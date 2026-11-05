@@ -1,0 +1,10 @@
+{
+  "name": "VizagPulse - Civic Issue Tracker",
+  "description": "Modern civic issue reporting and transparent fix auditing for Visakhapatnam (Vizag), India.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

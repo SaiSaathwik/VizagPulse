@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-canvas: #0B0B0D;
+    --bg-card: #141417;
+    --bg-card-elevated: #1B1B20;
+    --text-primary: #EDEDE8;
+    --text-secondary: #94949E;
+    --accent: #C8F169;
+    --accent-glow: rgba(200, 241, 105, 0.22);
+    --border-subtle: rgba(230, 230, 225, 0.18);
+    --border-divider: rgba(230, 230, 225, 0.10);
+    --status-open: #F59E0B;
+    --status-fixed: #22C55E;
+    --status-disputed: #EF4444;
+  }
+
+  body {
+    background-color: #0B0B0D;
+    color: #EDEDE8;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior-y: none;
+    letter-spacing: -0.015em;
+  }
+
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Shimmer animation for AI analysis skeleton */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 25%,
+    rgba(255, 255, 255, 0.10) 50%,
+    rgba(255, 255, 255, 0.03) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite ease-in-out;
+}
+
+/* Custom dark scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(230, 230, 225, 0.18);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(230, 230, 225, 0.32);
+}

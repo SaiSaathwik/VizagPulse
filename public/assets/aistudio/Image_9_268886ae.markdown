@@ -1,0 +1,242 @@
+---
+name: Obsidian Coastal Civic System
+colors:
+  surface: '#101419'
+  surface-dim: '#101419'
+  surface-bright: '#36393f'
+  surface-container-lowest: '#0a0e14'
+  surface-container-low: '#181c21'
+  surface-container: '#1c2025'
+  surface-container-high: '#262a30'
+  surface-container-highest: '#31353b'
+  on-surface: '#e0e2ea'
+  on-surface-variant: '#d8c3ad'
+  inverse-surface: '#e0e2ea'
+  inverse-on-surface: '#2d3136'
+  outline: '#a08e7a'
+  outline-variant: '#534434'
+  surface-tint: '#ffb95f'
+  primary: '#ffc174'
+  on-primary: '#472a00'
+  primary-container: '#f59e0b'
+  on-primary-container: '#613b00'
+  inverse-primary: '#855300'
+  secondary: '#6bd8cb'
+  on-secondary: '#003732'
+  secondary-container: '#29a195'
+  on-secondary-container: '#00302b'
+  tertiary: '#becee4'
+  on-tertiary: '#233143'
+  tertiary-container: '#a3b2c7'
+  on-tertiary-container: '#364557'
+  error: '#ffb4ab'
+  on-error: '#690005'
+  error-container: '#93000a'
+  on-error-container: '#ffdad6'
+  primary-fixed: '#ffddb8'
+  primary-fixed-dim: '#ffb95f'
+  on-primary-fixed: '#2a1700'
+  on-primary-fixed-variant: '#653e00'
+  secondary-fixed: '#89f5e7'
+  secondary-fixed-dim: '#6bd8cb'
+  on-secondary-fixed: '#00201d'
+  on-secondary-fixed-variant: '#005049'
+  tertiary-fixed: '#d4e4fa'
+  tertiary-fixed-dim: '#b9c8de'
+  on-tertiary-fixed: '#0d1c2d'
+  on-tertiary-fixed-variant: '#39485a'
+  background: '#101419'
+  on-background: '#e0e2ea'
+  surface-variant: '#31353b'
+typography:
+  display-hero:
+    fontFamily: Inter
+    fontSize: 48px
+    fontWeight: '700'
+    lineHeight: 52px
+    letterSpacing: -0.035em
+  display-hero-mobile:
+    fontFamily: Inter
+    fontSize: 34px
+    fontWeight: '700'
+    lineHeight: 38px
+    letterSpacing: -0.03em
+  headline-lg:
+    fontFamily: Inter
+    fontSize: 32px
+    fontWeight: '600'
+    lineHeight: 38px
+    letterSpacing: -0.03em
+  headline-lg-mobile:
+    fontFamily: Inter
+    fontSize: 26px
+    fontWeight: '600'
+    lineHeight: 32px
+    letterSpacing: -0.025em
+  headline-md:
+    fontFamily: Inter
+    fontSize: 22px
+    fontWeight: '600'
+    lineHeight: 28px
+    letterSpacing: -0.025em
+  headline-sm:
+    fontFamily: Inter
+    fontSize: 18px
+    fontWeight: '600'
+    lineHeight: 24px
+    letterSpacing: -0.02em
+  body-lg:
+    fontFamily: Inter
+    fontSize: 16px
+    fontWeight: '400'
+    lineHeight: 24px
+    letterSpacing: -0.01em
+  body-md:
+    fontFamily: Inter
+    fontSize: 14px
+    fontWeight: '400'
+    lineHeight: 20px
+    letterSpacing: -0.005em
+  body-sm:
+    fontFamily: Inter
+    fontSize: 13px
+    fontWeight: '400'
+    lineHeight: 18px
+    letterSpacing: 0em
+  label-caps:
+    fontFamily: Inter
+    fontSize: 10px
+    fontWeight: '700'
+    lineHeight: 12px
+    letterSpacing: 0.08em
+  label-md:
+    fontFamily: Inter
+    fontSize: 12px
+    fontWeight: '500'
+    lineHeight: 16px
+    letterSpacing: -0.005em
+  mono-metric:
+    fontFamily: Inter
+    fontSize: 28px
+    fontWeight: '600'
+    lineHeight: 32px
+    letterSpacing: -0.03em
+rounded:
+  sm: 0.25rem
+  DEFAULT: 0.5rem
+  md: 0.75rem
+  lg: 1rem
+  xl: 1.5rem
+  full: 9999px
+spacing:
+  gutter: 1rem
+  gutter-mobile: 0.75rem
+  margin: 2rem
+  margin-mobile: 1rem
+  space-xs: 0.25rem
+  space-sm: 0.5rem
+  space-md: 1rem
+  space-lg: 1.5rem
+  space-xl: 2.5rem
+---
+
+## Brand & Style
+
+This design system draws direct inspiration from Apple Pro hardware editorial design: precision-machined, austere, hyper-refined, and quietly authoritative. Tailored for an urban infrastructure, civic accountability, and civic issue resolution platform, the interface replaces traditional municipal bureaucracy with the surgical clarity of a high-end hardware diagnostic tool.
+
+The aesthetic philosophy centers on:
+- **Zero-Gloss Matte Precision:** Rejecting heavy blurs, glossy skeumorphism, and generic glassmorphism in favor of deep matte obsidian fields, deliberate structural contrast, and ultra-crisp micro-geometry.
+- **Architectural Bento Grids:** Information is surfaced via engineered modules that compartmentalize complex civic updates, telemetry, incident photography, and geospatial reporting into dense yet breathing units.
+- **Utilitarian Elegance:** High-contrast typography paired with tightly controlled status signals creates an experience that feels mission-critical, premium, and calm under operational pressure.
+
+## Colors
+
+The palette is engineered around pure matte darkness, balanced with high-grade optical neutrals and targeted functional accents.
+
+### Core Canvas & Surfaces
+- **Canvas Base:** Obsidian `#090D12` forms the void background, absorbing light without muddy brown or blue over-saturation.
+- **Bento Card Surface:** Steel-Slate `#131822` provides an elevated platform for interactive content, visually separated solely by tonal shift and fine hairline borders.
+- **Elevated Interactive Surface:** Raised Slate `#1B2230` for popovers, dropdown sheets, active drawer elements, and segment toggles.
+
+### Structural Hairlines
+- **Subtle Perimeter:** `rgba(255, 255, 255, 0.08)` for cards, bento cells, and structural dividers.
+- **Active / Focused Hairline:** `rgba(255, 255, 255, 0.20)` for form inputs, active selection outlines, and focused states.
+
+### Status & Accents
+- **Maritime Amber (`#F59E0B`):** Reserved for unassigned reports, urgent citizen escalations, active roadwork, electrical failures, and attention-required telemetry.
+- **Coastal Teal (`#0D9488`):** Reserved for validated resolutions, municipal sign-offs, restored services, and positive metrics.
+- **Chalk White (`#F9FAFB`):** Primary display text, numerical data points, and active icon strokes.
+- **Coastal Slate Mist (`#94A3B8`):** Secondary metadata, timestamps, input placeholders, category tags, and structural subheadings.
+
+## Typography
+
+Typography prioritizes dense, modern-editorial legibility using `Inter` configured to mirror the proportions and optical weight of Apple’s native display interfaces. 
+
+- **Negative Tracking on Display Elements:** Headlines, metrics, and hero sections execute negative letter-spacing (`-0.03em` to `-0.035em`) to create a condensed, deliberate, high-impact presence.
+- **Architectural Micro-Labels:** Small metadata classifications and telemetry tags utilize `label-caps` set in all-caps with generous tracking (`0.08em`) to mimic aerospace and hardware laser-etched labelling.
+- **Tabular Numerics:** Incident counts, coordinates, SLA countdowns, and civic department IDs leverage tabular lining figures (`font-feature-settings: "tnum" 1`) to preserve alignment across fluctuating real-time figures.
+
+## Layout & Spacing
+
+The layout is built around a rigorous matte bento grid system calibrated for high density and rapid scanning on mobile viewports while effortlessly expanding on wider tablet and desktop displays.
+
+### Grid Anatomy
+- **Mobile Viewport (< 640px):** Single-column stack or 2-column micro-bento matrix with `0.75rem` (12px) gutters and `1rem` (16px) lateral canvas margins.
+- **Tablet / Desktop Viewport (>= 640px):** 4 to 12-column modular grid using `1rem` (16px) gutters and `2rem` (32px) margins. Cards span dynamically (e.g., 2x1, 2x2, 4x2) depending on information priority.
+
+### Internal Spacing Cadence
+- Compact components (tags, micro-buttons, status pills) use `space-xs` (4px) to `space-sm` (8px).
+- Bento card internal padding strictly adheres to `space-md` (16px) on mobile and `space-lg` (24px) on wider displays.
+- Visual separation between unrelated content groupings enforces `space-xl` (40px) to maintain editorial rhythm without relying on colored visual dividers.
+
+## Elevation & Depth
+
+Depth is articulated entirely through planar surface tone and ultra-sharp perimeter definition, completely eschewing diffused dropped shadows, neon glows, and glassmorphic blurs.
+
+### Surface Stratification
+1. **Level 0 (Environment Canvas):** Pure Matte Obsidian (`#090D12`).
+2. **Level 1 (Bento Foundation):** Steel-Slate (`#131822`) with a single crisp 1px hairline border in `rgba(255, 255, 255, 0.08)`.
+3. **Level 2 (In-Card Blocks & Embedded Containers):** Darkened Void wells (`#090D12` inset) or Elevated Slate tiles (`#1B2230`) framed with `rgba(255, 255, 255, 0.05)`.
+4. **Level 3 (Floating Overlays & Modals):** Elevated Slate (`#1B2230`) bordered by `rgba(255, 255, 255, 0.16)` with a crisp, opaque black perimeter rim (`0 0 0 1px #000000`) for surgical detachment from the canvas.
+
+### Hairline Engineering
+Dividers within cards do not use standard solid grey lines; they employ 1px borders rendered at `rgba(255, 255, 255, 0.06)`. Under no circumstances should soft drop shadows or ambient colored glows bleed across modules.
+
+## Shapes
+
+The geometric signature balances expansive, structural card curves with hyper-disciplined interior sub-elements.
+
+- **Bento Modules & Outer Shells:** Employ refined radii between `18px` and `24px` (`rounded-xl` equivalent), establishing a warm, hardware-like silhouette reminiscent of milled anodized aluminum casings.
+- **Nested Inner Modules & Inputs:** Inner media containers, map snippets, and form fields scale down to `10px`–`12px` to honor proper concentric rounding relationships.
+- **Status Badges & Micro Action Chips:** Fully pill-shaped (`9999px`) to create geometric contrast against the architectural rectangular bento cards.
+
+## Components
+
+### Bento Cards
+- **Structure:** Solid `#131822` background, 20px corner radius, 1px border `rgba(255, 255, 255, 0.08)`.
+- **Header:** Upper row integrates an uppercase micro-label (`label-caps` in `#94A3B8`) accompanied by an optional status dot or action icon.
+- **Content:** Uncluttered typography hierarchy with `#F9FAFB` for core headlines and `#94A3B8` for secondary notes. Inset images or map previews must clip cleanly to an internal radius of 12px.
+
+### Buttons & Interactive Controls
+- **Primary Action:** Solid Chalk White (`#F9FAFB`) fill with pure Obsidian (`#090D12`) typography, semi-bold weight, 12px border radius. Hover/active shifts opacity to `0.92`.
+- **Secondary / Action Surface:** Dark Steel-Slate (`#1B2230`) with a 1px border in `rgba(255, 255, 255, 0.12)`, Chalk White label. Active state initiates subtle border brightening to `rgba(255, 255, 255, 0.24)`.
+- **Accent Primary (Emergency / Report):** Maritime Amber (`#F59E0B`) fill with deep Obsidian text for urgent actions.
+- **Ghost Action:** Borderless, Chalk White or Coastal Slate Mist text with immediate background tint `rgba(255, 255, 255, 0.05)` on interaction.
+
+### Status Chips & Badges
+- **Urgent / In-Progress:** Pill badge featuring a solid background of `rgba(245, 158, 11, 0.12)`, 1px hairline border of `rgba(245, 158, 11, 0.30)`, and typography in Maritime Amber (`#F59E0B`). Contains a 6px static circle dot indicator.
+- **Resolved / Clean:** Pill badge with `rgba(13, 148, 136, 0.12)` background, `rgba(13, 148, 136, 0.30)` hairline, and Coastal Teal (`#0D9488`) typography.
+- **Neutral / Informational:** Pill badge with `rgba(255, 255, 255, 0.06)` background, `rgba(255, 255, 255, 0.10)` border, and Slate Mist (`#94A3B8`) text.
+
+### Form Inputs & Geospatial Search
+- **Container:** `#090D12` inset canvas or `#131822` surface with a 1px hairline `rgba(255, 255, 255, 0.10)`, 12px radius, and 14px padding.
+- **Typography:** Active value in `#F9FAFB`, placeholder in `#94A3B8`.
+- **Focus State:** 1px hairline border crisply highlights to `#F9FAFB` without fuzzy outer focus rings.
+
+### Selection Controls (Checkbox & Radio)
+- **Checkbox:** Square box with 4px corner radius, `#131822` background, 1px hairline `rgba(255, 255, 255, 0.20)`. Checked state displays a Chalk White checkmark against a solid Maritime Amber or Coastal Teal background depending on functional context.
+- **Radio:** Concentric circle with matching hairline; active state shows a centered, unblurred 6px Chalk White dot.
+
+### Lists & Activity Feeds
+- **Row Architecture:** Edge-to-edge transparent rows separated by 1px hairline lines `rgba(255, 255, 255, 0.06)`.
+- **Metadata Alignment:** Timestamps and location tags positioned flush right, rendered in `label-md` with Slate Mist coloration.
