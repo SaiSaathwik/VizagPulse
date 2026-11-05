@@ -1,21 +1,26 @@
-import React from 'react';
-import { motion } from 'motion/react';
+import React, { useState, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Issue } from '../types';
 import { formatTimeAgo, formatDaysOpen, formatDaysToFix } from '../utils/timeAgo';
 import { isIssueDisputed } from '../utils/storage';
+import { compressImage } from '../utils/imageCompressor';
 import { BeforeAfterSlider } from './BeforeAfterSlider';
+import { PlusOneButton } from './PlusOneButton';
 import {
   ArrowLeft,
   MapPin,
   ExternalLink,
-  ThumbsUp,
   Sparkles,
   Clock,
   CheckCircle,
   XCircle,
   ShieldAlert,
-  Building2,
+  Camera,
+  Image as ImageIcon,
+  Loader2,
+  RefreshCw,
   AlertTriangle,
+  HelpCircle,
 } from 'lucide-react';
 
 interface IssuePageProps {
@@ -24,6 +29,12 @@ interface IssuePageProps {
   onTogglePlusOne: (issueId: string) => void;
   deviceFixVote?: 'yes' | 'no';
   onVoteFix: (issueId: string, vote: 'yes' | 'no') => void;
+  onMarkFixed: (
+    issueId: string,
+    photoAfter: string,
+    aiVerdict?: 'fixed' | 'not_fixed' | 'unsure',
+    aiReason?: string
+  ) => void;
   onBack: () => void;
 }
 
@@ -33,6 +44,7 @@ export const IssuePage: React.FC<IssuePageProps> = ({
   onTogglePlusOne,
   deviceFixVote,
   onVoteFix,
+  onMarkFixed,
   onBack,
 }) => {
   const isDisputed = isIssueDisputed(issue);
@@ -45,6 +57,90 @@ export const IssuePage: React.FC<IssuePageProps> = ({
     issue.type === 'Other' && issue.customType
       ? issue.customType
       : issue.type;
+
+  // Feature E: AI Fix Check State on Issue Page
+  const [showFixUpload, setShowFixUpload] = useState<boolean>(false);
+  const [tempAfterPhoto, setTempAfterPhoto] = useState<string | null>(null);
+  const [isCompressing, setIsCompressing] = useState<boolean>(false);
+  const [isAiChecking, setIsAiChecking] = useState<boolean>(false);
+  const [aiResult, setAiResult] = useState<{
+    verdict: 'fixed' | 'not_fixed' | 'unsure';
+    reason: string;
+  } | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAfterPhotoSelected = async (file: File) => {
+    try {
+      setIsCompressing(true);
+      const compressed = await compressImage(file, 1024, 0.82);
+      // Temporarily save photo in state so it is never lost if AI fails
+      setTempAfterPhoto(compressed);
+      setIsCompressing(false);
+
+      // Run shared AI fix check
+      runAiFixCheck(compressed);
+    } catch (err) {
+      console.error('Failed to compress after photo:', err);
+      setIsCompressing(false);
+      alert('Unable to process photo. Please choose another image.');
+    }
+  };
+
+  const runAiFixCheck = async (photoAfterBase64: string) => {
+    setIsAiChecking(true);
+    setAiResult(null);
+    setAiError(null);
+
+    try {
+      const res = await fetch('/api/ai/fix-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photoBeforeBase64: issue.photoBefore,
+          photoAfterBase64,
+          issueType: issue.type,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      if (data && data.verdict) {
+        setAiResult({
+          verdict: data.verdict,
+          reason: data.reason || 'Verification comparison complete.',
+        });
+
+        // If AI confirmed fixed, auto apply or prompt
+        if (data.verdict === 'fixed') {
+          onMarkFixed(issue.id, photoAfterBase64, 'fixed', data.reason);
+          setShowFixUpload(false);
+        }
+      } else {
+        throw new Error('Invalid response shape from AI fix check');
+      }
+    } catch (err: any) {
+      console.warn('AI fix check failed or timed out:', err);
+      setAiError('AI check unavailable');
+    } finally {
+      setIsAiChecking(false);
+    }
+  };
+
+  const confirmManualFix = () => {
+    if (!tempAfterPhoto) return;
+    onMarkFixed(
+      issue.id,
+      tempAfterPhoto,
+      aiResult?.verdict || 'unsure',
+      aiResult?.reason || 'Confirmed via citizen resolution.'
+    );
+    setShowFixUpload(false);
+    setTempAfterPhoto(null);
+  };
 
   return (
     <motion.div
@@ -127,24 +223,13 @@ export const IssuePage: React.FC<IssuePageProps> = ({
             </h1>
           </div>
 
-          {/* +1 Button */}
-          <motion.button
-            whileTap={{ scale: 0.90 }}
-            onClick={() => onTogglePlusOne(issue.id)}
-            className={`flex items-center space-x-2 px-4 py-2.5 rounded-2xl border transition-all text-xs font-bold tnum shrink-0 ${
-              isVotedPlusOne
-                ? 'bg-[#C8F169] text-[#0B0B0D] border-[#C8F169] shadow-md shadow-[#C8F169]/20'
-                : 'bg-[#1B1B20] hover:bg-[#23232A] text-[#EDEDE8] border-[rgba(230,230,225,0.18)]'
-            }`}
-          >
-            <ThumbsUp
-              className={`w-4 h-4 ${
-                isVotedPlusOne ? 'fill-[#0B0B0D] stroke-[#0B0B0D]' : ''
-              }`}
-            />
-            <span>+1</span>
-            <span className="font-black">{issue.plusOnes}</span>
-          </motion.button>
+          {/* Feature B: +1 Button (idle "+1", active "+N", no thumbs-up icon) */}
+          <PlusOneButton
+            isVoted={isVotedPlusOne}
+            count={issue.plusOnes}
+            onToggle={() => onTogglePlusOne(issue.id)}
+            size="md"
+          />
         </div>
 
         {/* Location & Google Maps Link */}
@@ -171,93 +256,222 @@ export const IssuePage: React.FC<IssuePageProps> = ({
         </div>
 
         {/* Status Line */}
-        <div className="p-3.5 rounded-2xl bg-[#1B1B20] border border-[rgba(230,230,225,0.10)] text-xs flex items-center space-x-2">
-          {issue.status === 'open' ? (
-            <>
-              <Clock className="w-4 h-4 text-[#F59E0B] shrink-0" />
-              <span className="text-[#F59E0B] font-bold">
-                Waiting for a fix. {formatDaysOpen(issue.createdAt)}.
-              </span>
-            </>
-          ) : (
-            <>
-              <CheckCircle className="w-4 h-4 text-[#22C55E] shrink-0" />
-              <span className="text-[#22C55E] font-bold">
-                {formatDaysToFix(issue.createdAt, issue.fixedAt)}.
-              </span>
-            </>
+        <div className="p-3.5 rounded-2xl bg-[#1B1B20] border border-[rgba(230,230,225,0.10)] text-xs flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            {issue.status === 'open' ? (
+              <>
+                <Clock className="w-4 h-4 text-[#F59E0B] shrink-0" />
+                <span className="text-[#F59E0B] font-bold">
+                  Waiting for a fix. {formatDaysOpen(issue.createdAt)}.
+                </span>
+              </>
+            ) : (
+              <>
+                <CheckCircle className="w-4 h-4 text-[#22C55E] shrink-0" />
+                <span className="text-[#22C55E] font-bold">
+                  {formatDaysToFix(issue.createdAt, issue.fixedAt)}.
+                </span>
+              </>
+            )}
+          </div>
+
+          {issue.priority && issue.status === 'open' && (
+            <span className="text-[10px] font-bold text-[#EDEDE8] bg-[#0B0B0D] px-2 py-0.5 rounded-full border border-[rgba(230,230,225,0.12)]">
+              Priority {issue.priority}/10
+            </span>
           )}
         </div>
 
-        {/* Saved AI Analysis Section: situation, severity, hazard, department */}
-        <div className="p-4 rounded-2xl bg-[#1B1B20] border border-[rgba(230,230,225,0.14)] space-y-3">
-          <div className="flex items-center justify-between border-b border-[rgba(230,230,225,0.10)] pb-2">
-            <div className="flex items-center space-x-1.5 text-xs font-extrabold text-[#EDEDE8]">
-              <Sparkles className="w-4 h-4 text-[#C8F169]" />
-              <span>AI Analysis</span>
-            </div>
-            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-[#0B0B0D] text-[#C8F169] border border-[#C8F169]/30 uppercase tracking-widest">
-              AI-generated
-            </span>
-          </div>
+        {/* Priority Reason info if open */}
+        {issue.status === 'open' && issue.priorityReason && (
+          <p className="text-xs text-[#94949E] italic px-1">
+            "{issue.priorityReason}"
+          </p>
+        )}
 
-          {/* Situation Text */}
-          <div>
-            <span className="text-[10px] font-bold text-[#94949E] uppercase tracking-wider block mb-1">
-              Situation Assessment
-            </span>
-            <p className="text-xs text-[#EDEDE8] leading-relaxed">
-              {issue.aiSituation || issue.aiReason || 'Civic infrastructure defect logged in Visakhapatnam.'}
-            </p>
-          </div>
-
-          {/* Severity Meter */}
-          {issue.aiSeverity !== undefined && (
-            <div className="space-y-1 pt-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-[10px] font-bold text-[#94949E] uppercase tracking-wider">
-                  Severity Rating
-                </span>
-                <span className="font-mono font-extrabold text-sm text-[#C8F169] tnum">
-                  {issue.aiSeverity}/10
-                </span>
-              </div>
-              <div className="w-full h-2 bg-[#0B0B0D] rounded-full overflow-hidden p-0.5">
-                <div
-                  className="h-full rounded-full bg-[#C8F169]"
-                  style={{ width: `${(issue.aiSeverity / 10) * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Hazard Risk */}
-          {issue.aiHazard && (
-            <div className="p-2.5 rounded-xl bg-[#0B0B0D] border border-red-500/20 text-xs flex items-start space-x-2">
-              <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-              <div>
-                <span className="text-[10px] font-bold text-red-300 uppercase tracking-wider block">
-                  Identified Hazard
-                </span>
-                <p className="text-[#EDEDE8] text-[11px] mt-0.5">
-                  {issue.aiHazard}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Department */}
-          {issue.aiDepartment && (
-            <div className="flex items-center space-x-2 text-xs text-[#94949E] pt-1 border-t border-[rgba(230,230,225,0.08)]">
-              <Building2 className="w-3.5 h-3.5 text-[#C8F169] shrink-0" />
-              <span>Assigned Department:</span>
-              <strong className="text-[#EDEDE8] font-bold truncate">
-                {issue.aiDepartment}
-              </strong>
-            </div>
-          )}
-        </div>
+        {/* If Open: Upload After Photo Button (Feature E on Issue Page) */}
+        {issue.status === 'open' && !showFixUpload && (
+          <button
+            type="button"
+            onClick={() => setShowFixUpload(true)}
+            className="w-full py-3 px-4 rounded-full bg-[#1B1B20] hover:bg-[#24242C] text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] text-xs font-extrabold flex items-center justify-center space-x-2 transition active:scale-98"
+          >
+            <Camera className="w-4 h-4 text-[#C8F169]" />
+            <span>Upload "After" Photo (Verify Fix)</span>
+          </button>
+        )}
       </div>
+
+      {/* Feature E: Inline Fix Upload & AI Check on Issue Page */}
+      {issue.status === 'open' && showFixUpload && (
+        <div className="bg-[#141417] border border-[rgba(230,230,225,0.18)] rounded-[26px] p-5 space-y-3.5 shadow-md">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-extrabold text-[#EDEDE8]">
+              Verify Resolved Fix
+            </h3>
+            <button
+              onClick={() => {
+                setShowFixUpload(false);
+                setTempAfterPhoto(null);
+                setAiResult(null);
+              }}
+              className="text-xs text-[#94949E] hover:text-[#EDEDE8]"
+            >
+              Cancel
+            </button>
+          </div>
+
+          <p className="text-xs text-[#94949E]">
+            Take or upload an after photo of the repaired spot. Gemini will compare before and after.
+          </p>
+
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleAfterPhotoSelected(file);
+            }}
+          />
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleAfterPhotoSelected(file);
+            }}
+          />
+
+          {tempAfterPhoto ? (
+            <div className="space-y-3">
+              <div className="relative aspect-[16/9] rounded-2xl overflow-hidden bg-black border border-[#22C55E]/40">
+                <img
+                  src={tempAfterPhoto}
+                  alt="After repair preview"
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute top-2 left-2 px-2.5 py-0.5 rounded-full bg-[#22C55E] text-[#0B0B0D] text-[10px] font-extrabold uppercase">
+                  AFTER PHOTO
+                </div>
+              </div>
+
+              {/* Shimmering "Checking with AI..." */}
+              {isAiChecking && (
+                <div className="p-3 rounded-2xl bg-[#1B1B20] border border-[#C8F169]/30 flex items-center space-x-2 text-xs text-[#EDEDE8]">
+                  <Loader2 className="w-4 h-4 animate-spin text-[#C8F169]" />
+                  <span>Checking with AI... comparing before &amp; after photos</span>
+                </div>
+              )}
+
+              {/* AI Result Card */}
+              {aiResult && !isAiChecking && (
+                <div className="p-3.5 rounded-2xl bg-[#1B1B20] border border-[rgba(230,230,225,0.18)] space-y-2.5">
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <div className="flex items-center space-x-1.5 text-[#EDEDE8]">
+                      <Sparkles className="w-3.5 h-3.5 text-[#C8F169]" />
+                      <span>AI-assisted check</span>
+                    </div>
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#0B0B0D] text-[#C8F169] border border-[#C8F169]/30 uppercase">
+                      AI
+                    </span>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    {aiResult.verdict === 'fixed' && (
+                      <span className="px-2.5 py-0.5 rounded-full bg-[#22C55E]/20 border border-[#22C55E] text-[#22C55E] text-xs font-bold flex items-center space-x-1">
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        <span>Verified Fixed</span>
+                      </span>
+                    )}
+                    {aiResult.verdict === 'not_fixed' && (
+                      <span className="px-2.5 py-0.5 rounded-full bg-red-950/40 border border-red-500 text-red-300 text-xs font-bold flex items-center space-x-1">
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>Not Fixed: Issue Remains</span>
+                      </span>
+                    )}
+                    {aiResult.verdict === 'unsure' && (
+                      <span className="px-2.5 py-0.5 rounded-full bg-[#F59E0B]/20 border border-[#F59E0B] text-[#F59E0B] text-xs font-bold flex items-center space-x-1">
+                        <HelpCircle className="w-3.5 h-3.5" />
+                        <span>Unsure: Location or Scene Ambiguous</span>
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-[#94949E] leading-relaxed">
+                    "{aiResult.reason}"
+                  </p>
+
+                  {/* Actions for not_fixed or unsure */}
+                  {(aiResult.verdict === 'not_fixed' || aiResult.verdict === 'unsure') && (
+                    <div className="pt-2 flex items-center space-x-2">
+                      <button
+                        type="button"
+                        onClick={confirmManualFix}
+                        className="flex-1 py-2 px-3 rounded-full bg-[#EDEDE8] hover:bg-white text-[#0B0B0D] text-xs font-extrabold transition shadow"
+                      >
+                        Mark fixed anyway
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => cameraInputRef.current?.click()}
+                        className="py-2 px-3 rounded-full bg-[#1B1B20] text-[#94949E] hover:text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] text-xs font-bold transition"
+                      >
+                        Retake photo
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* AI Error / Timeout Fallback */}
+              {aiError && !isAiChecking && (
+                <div className="p-3.5 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-2 text-xs">
+                  <div className="flex items-center space-x-2 text-amber-200">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span className="font-bold">{aiError}</span>
+                  </div>
+                  <p className="text-[11px] text-amber-200/80">
+                    You can still mark this issue as fixed manually.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={confirmManualFix}
+                    className="w-full py-2 px-3 rounded-full bg-[#EDEDE8] text-[#0B0B0D] text-xs font-extrabold transition shadow"
+                  >
+                    Mark fixed
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <button
+                type="button"
+                disabled={isCompressing}
+                onClick={() => cameraInputRef.current?.click()}
+                className="w-full py-3 px-4 rounded-full bg-[#EDEDE8] hover:bg-white text-[#0B0B0D] text-xs font-extrabold flex items-center justify-center space-x-2 transition"
+              >
+                <Camera className="w-4 h-4" />
+                <span>Take After Photo (Camera)</span>
+              </button>
+              <button
+                type="button"
+                disabled={isCompressing}
+                onClick={() => galleryInputRef.current?.click()}
+                className="w-full py-2.5 px-3 rounded-full bg-[#1B1B20] text-[#94949E] hover:text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] text-xs font-bold flex items-center justify-center space-x-2 transition"
+              >
+                <ImageIcon className="w-4 h-4" />
+                <span>Choose from gallery</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ================= FIXED SECTION: "IS IT REALLY FIXED?" ================= */}
       {issue.status === 'fixed' && (

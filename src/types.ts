@@ -6,15 +6,6 @@ export type IssueType =
   | 'Water leak'
   | 'Other';
 
-export interface AiAnalysisResult {
-  situation: string;
-  suggestedType: IssueType;
-  severity: number; // 1-10
-  severityReason: string;
-  hazard: string;
-  department: string;
-}
-
 export interface Issue {
   id: string;
   photoBefore: string;
@@ -30,11 +21,9 @@ export interface Issue {
   fixedAt?: number; // timestamp in ms
   fixYes: number;
   fixNo: number;
-  aiSeverity?: number; // 1-10
-  aiReason?: string;
-  aiSituation?: string;
-  aiHazard?: string;
-  aiDepartment?: string;
+  priority?: number; // 1-10
+  priorityReason?: string;
+  isAiPriority?: boolean;
 }
 
 export type TabType = 'feed' | 'report' | 'authority';

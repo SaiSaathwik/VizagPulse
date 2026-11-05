@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Menu, X, RotateCcw, ShieldAlert, Sparkles, ExternalLink, Heart } from 'lucide-react';
+import { Menu, X, RotateCcw, Activity } from 'lucide-react';
+import { SystemCheckModal } from './SystemCheckModal';
 
 interface HeaderProps {
   onResetDemo: () => void;
@@ -15,6 +16,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showConfirmReset, setShowConfirmReset] = useState(false);
+  const [systemCheckOpen, setSystemCheckOpen] = useState(false);
 
   return (
     <>
@@ -134,15 +136,34 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
                 </div>
 
-                {/* Reset Demo Data Action */}
-                <div className="space-y-2">
+                {/* System Diagnostics & Demo Controls */}
+                <div className="space-y-2.5">
                   <h3 className="text-xs font-bold text-[#EDEDE8] uppercase tracking-wider">
-                    Demo Controls
+                    Tools &amp; Controls
                   </h3>
+
+                  {/* Feature G: Run System Check Item */}
+                  <button
+                    onClick={() => {
+                      setDrawerOpen(false);
+                      setSystemCheckOpen(true);
+                    }}
+                    className="w-full py-3 px-4 rounded-2xl bg-[#1B1B20] hover:bg-[#23232A] border border-[rgba(230,230,225,0.18)] text-xs font-bold text-[#EDEDE8] flex items-center justify-between transition active:scale-98"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <Activity className="w-4 h-4 text-[#C8F169]" />
+                      <span>Run system check</span>
+                    </div>
+                    <span className="text-[10px] text-[#C8F169] uppercase font-bold tracking-wider">
+                      Self-Test
+                    </span>
+                  </button>
+
+                  {/* Reset Demo Data Action */}
                   {showConfirmReset ? (
                     <div className="p-3 rounded-2xl bg-red-950/30 border border-red-500/30 space-y-2">
                       <p className="text-xs text-red-300 font-semibold">
-                        Reset all issues and votes to default 8 sample reports?
+                        Reset all issues and votes to default sample reports?
                       </p>
                       <div className="flex items-center space-x-2">
                         <button
@@ -181,13 +202,19 @@ export const Header: React.FC<HeaderProps> = ({
                   Created by Team Ouroboros
                 </p>
                 <p className="text-[10px] text-[#94949E]">
-                  VizagPulse v2.4 • Visakhapatnam, AP
+                  VizagPulse v2.5 • Visakhapatnam, AP
                 </p>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+
+      {/* Feature G: System Check Bottom Sheet */}
+      <SystemCheckModal
+        isOpen={systemCheckOpen}
+        onClose={() => setSystemCheckOpen(false)}
+      />
     </>
   );
 };

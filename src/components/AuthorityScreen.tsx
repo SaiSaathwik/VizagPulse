@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Issue, IssueType } from '../types';
-import { formatDaysOpen, formatDaysToFix } from '../utils/timeAgo';
+import { formatDaysOpen } from '../utils/timeAgo';
 import { compressImage } from '../utils/imageCompressor';
 import {
   ShieldCheck,
@@ -15,7 +15,6 @@ import {
   X,
   Sparkles,
   BarChart3,
-  Building2,
 } from 'lucide-react';
 
 interface AuthorityScreenProps {
@@ -51,6 +50,7 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
     verdict: 'fixed' | 'not_fixed' | 'unsure';
     reason: string;
   } | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
@@ -68,19 +68,19 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
   const avgFixTime =
     fixedIssues.length > 0 ? (totalFixDays / fixedIssues.length).toFixed(1) : '0';
 
-  // Issue counts by type for bar chart
+  // Category counts for bar chart
   const countsByType = CATEGORIES.map((cat) => ({
     category: cat,
     count: issues.filter((i) => i.type === cat).length,
   }));
   const maxCategoryCount = Math.max(1, ...countsByType.map((c) => c.count));
 
-  // Sort open issues by priority (severity, +1s, age)
+  // Sort open issues: highest priority (1-10) first, then oldest first
   const sortedOpenIssues = [...openIssues].sort((a, b) => {
-    const scoreA = (a.aiSeverity ?? 0) + a.plusOnes;
-    const scoreB = (b.aiSeverity ?? 0) + b.plusOnes;
-    if (scoreB !== scoreA) {
-      return scoreB - scoreA;
+    const prioA = a.priority ?? 5;
+    const prioB = b.priority ?? 5;
+    if (prioB !== prioA) {
+      return prioB - prioA;
     }
     return a.createdAt - b.createdAt;
   });
@@ -89,27 +89,32 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
     setSelectedIssueForFix(issue);
     setAfterPhoto(null);
     setAiResult(null);
+    setAiError(null);
   };
 
   const handleAfterPhotoSelected = async (file: File) => {
     if (!selectedIssueForFix) return;
     try {
       setIsCompressing(true);
-      const compressed = await compressImage(file, 800, 0.82);
+      const compressed = await compressImage(file, 1024, 0.82);
+      // Temporarily save photo in state so it is never lost if AI fails
       setAfterPhoto(compressed);
       setIsCompressing(false);
 
-      // Run AI fix verification
+      // Run shared AI fix verification
       runAiFixCheck(selectedIssueForFix, compressed);
     } catch (err) {
       console.error('Failed to compress after photo:', err);
       setIsCompressing(false);
+      alert('Unable to process photo. Please choose another image.');
     }
   };
 
   const runAiFixCheck = async (issue: Issue, afterPhotoData: string) => {
     setAiChecking(true);
     setAiResult(null);
+    setAiError(null);
+
     try {
       const res = await fetch('/api/ai/fix-check', {
         method: 'POST',
@@ -123,15 +128,20 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      if (data.verdict) {
+
+      if (data && data.verdict) {
         setAiResult({
           verdict: data.verdict,
-          reason: data.reason || 'AI verification complete.',
+          reason: data.reason || 'Verification audit complete.',
         });
+
+        // If AI confirmed fixed, auto-enable confirm
+      } else {
+        throw new Error('Invalid verdict payload');
       }
     } catch (err: any) {
-      console.warn('AI fix check failed/skipped silently:', err);
-      setAiResult(null);
+      console.warn('AI fix check failed or timed out:', err);
+      setAiError('AI check unavailable');
     } finally {
       setAiChecking(false);
     }
@@ -142,8 +152,8 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
     onMarkFixed(
       selectedIssueForFix.id,
       afterPhoto,
-      aiResult?.verdict,
-      aiResult?.reason
+      aiResult?.verdict || 'unsure',
+      aiResult?.reason || 'Confirmed resolution by municipal authority.'
     );
     setSelectedIssueForFix(null);
     setAfterPhoto(null);
@@ -237,7 +247,7 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
           </span>
         </div>
 
-        {/* Modern styled horizontal bar chart */}
+        {/* Horizontal bar chart */}
         <div className="space-y-2.5">
           {countsByType.map(({ category, count }) => {
             const percentage = Math.round((count / maxCategoryCount) * 100);
@@ -271,7 +281,7 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
           <span className="font-extrabold uppercase tracking-wider text-[11px] text-[#EDEDE8]">
             Priority Queue ({sortedOpenIssues.length})
           </span>
-          <span className="text-[10px]">Severity &amp; +1s Ranked</span>
+          <span className="text-[10px]">Priority &amp; +1s Ranked</span>
         </div>
 
         {sortedOpenIssues.length === 0 ? (
@@ -298,9 +308,16 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
                 className="bg-[#141417] border border-[rgba(230,230,225,0.18)] rounded-[26px] p-4 space-y-3 shadow-sm transition"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-extrabold tracking-widest uppercase px-2.5 py-0.5 rounded-full bg-[#1B1B20] text-[#C8F169] border border-[#C8F169]/30">
-                    {displayType}
-                  </span>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] font-extrabold tracking-widest uppercase px-2.5 py-0.5 rounded-full bg-[#1B1B20] text-[#C8F169] border border-[#C8F169]/30">
+                      {displayType}
+                    </span>
+                    {issue.priority && (
+                      <span className="text-[10px] font-bold text-[#EDEDE8] bg-[#0B0B0D] px-2 py-0.5 rounded-full border border-[rgba(230,230,225,0.10)]">
+                        P{issue.priority}
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs text-[#94949E] font-medium tnum">
                     {formatDaysOpen(issue.createdAt)}
                   </span>
@@ -325,12 +342,14 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
                     >
                       {issue.areaName || 'Visakhapatnam'}
                     </p>
-                    <p className="text-[11px] text-[#94949E] line-clamp-1">
-                      {issue.aiSituation || issue.aiReason || 'Awaiting municipal inspection.'}
-                    </p>
+                    {issue.priorityReason && (
+                      <p className="text-[11px] text-[#94949E] line-clamp-1 italic">
+                        "{issue.priorityReason}"
+                      </p>
+                    )}
                     <div className="flex items-center space-x-2 text-[10px] text-[#94949E] tnum pt-0.5">
                       <span className="text-[#C8F169] font-bold">
-                        Sev {issue.aiSeverity ?? 5}/10
+                        Priority {issue.priority ?? 5}/10
                       </span>
                       <span>•</span>
                       <span>{issue.plusOnes} citizens +1</span>
@@ -452,22 +471,22 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
 
                     {/* AI Fix Check Status */}
                     {aiChecking && (
-                      <div className="p-3 rounded-2xl bg-[#1B1B20] border border-[rgba(230,230,225,0.10)] flex items-center space-x-2 text-xs text-[#94949E]">
+                      <div className="p-3 rounded-2xl bg-[#1B1B20] border border-[#C8F169]/30 flex items-center space-x-2 text-xs text-[#EDEDE8]">
                         <Loader2 className="w-4 h-4 animate-spin text-[#C8F169]" />
-                        <span>Running AI visual verification...</span>
+                        <span>Checking with AI... comparing before &amp; after photos</span>
                       </div>
                     )}
 
-                    {/* AI Fix Check Result */}
+                    {/* AI Fix Check Result Card */}
                     {aiResult && !aiChecking && (
-                      <div className="p-3.5 rounded-2xl bg-[#1B1B20] border border-[rgba(230,230,225,0.18)] space-y-2">
+                      <div className="p-3.5 rounded-2xl bg-[#1B1B20] border border-[rgba(230,230,225,0.18)] space-y-2.5">
                         <div className="flex items-center justify-between text-xs font-bold">
                           <div className="flex items-center space-x-1.5 text-[#EDEDE8]">
                             <Sparkles className="w-3.5 h-3.5 text-[#C8F169]" />
                             <span>AI-assisted check</span>
                           </div>
-                          <span className="text-[10px] font-mono text-[#94949E]">
-                            Gemini 3.8 Flash
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#0B0B0D] text-[#C8F169] border border-[#C8F169]/30 uppercase">
+                            AI
                           </span>
                         </div>
 
@@ -482,13 +501,13 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
                           {aiResult.verdict === 'not_fixed' && (
                             <span className="px-2.5 py-0.5 rounded-full bg-red-950/40 border border-red-500 text-red-300 text-xs font-bold flex items-center space-x-1">
                               <XCircle className="w-3.5 h-3.5" />
-                              <span>Warning: Issue Still Detected</span>
+                              <span>Not Fixed: Issue Remains</span>
                             </span>
                           )}
                           {aiResult.verdict === 'unsure' && (
                             <span className="px-2.5 py-0.5 rounded-full bg-[#F59E0B]/20 border border-[#F59E0B] text-[#F59E0B] text-xs font-bold flex items-center space-x-1">
                               <HelpCircle className="w-3.5 h-3.5" />
-                              <span>Unsure: Location or Angle Ambiguous</span>
+                              <span>Unsure: Scene Ambiguous</span>
                             </span>
                           )}
                         </div>
@@ -497,12 +516,45 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
                           "{aiResult.reason}"
                         </p>
 
-                        {/* Warning if AI says not_fixed (authority still allowed to override) */}
-                        {aiResult.verdict === 'not_fixed' && (
-                          <div className="p-2.5 rounded-xl bg-red-950/30 border border-red-500/30 text-[11px] text-red-200">
-                            ⚠️ <strong>Authority Override:</strong> The AI flagged that the issue may not be resolved. You may still confirm and mark it fixed if you have verified the site in person.
+                        {/* Buttons for not_fixed / unsure */}
+                        {(aiResult.verdict === 'not_fixed' || aiResult.verdict === 'unsure') && (
+                          <div className="pt-2 flex items-center space-x-2">
+                            <button
+                              type="button"
+                              onClick={handleConfirmFix}
+                              className="flex-1 py-2 px-3 rounded-full bg-[#EDEDE8] hover:bg-white text-[#0B0B0D] text-xs font-extrabold transition shadow"
+                            >
+                              Mark fixed anyway
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => cameraInputRef.current?.click()}
+                              className="py-2 px-3 rounded-full bg-[#1B1B20] text-[#94949E] hover:text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] text-xs font-bold transition"
+                            >
+                              Retake photo
+                            </button>
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {/* AI Error / Timeout Fallback */}
+                    {aiError && !aiChecking && (
+                      <div className="p-3.5 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-2 text-xs">
+                        <div className="flex items-center space-x-2 text-amber-200">
+                          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span className="font-bold">{aiError}</span>
+                        </div>
+                        <p className="text-[11px] text-amber-200/80">
+                          You can still mark this issue as fixed manually.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleConfirmFix}
+                          className="w-full py-2 px-3 rounded-full bg-[#EDEDE8] text-[#0B0B0D] text-xs font-extrabold transition shadow"
+                        >
+                          Mark fixed
+                        </button>
                       </div>
                     )}
                   </div>
@@ -540,19 +592,17 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
                 >
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  disabled={!afterPhoto || isCompressing || aiChecking}
-                  onClick={handleConfirmFix}
-                  className={`flex-1 py-2.5 px-3 rounded-full text-xs font-black flex items-center justify-center space-x-1.5 transition ${
-                    afterPhoto && !isCompressing && !aiChecking
-                      ? 'bg-[#C8F169] hover:bg-[#d6f78a] text-[#0B0B0D] shadow'
-                      : 'bg-[#1B1B20] text-[#94949E]/40 cursor-not-allowed'
-                  }`}
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Confirm Resolution</span>
-                </button>
+                {aiResult?.verdict === 'fixed' && (
+                  <button
+                    type="button"
+                    disabled={!afterPhoto || isCompressing || aiChecking}
+                    onClick={handleConfirmFix}
+                    className="flex-1 py-2.5 px-3 rounded-full text-xs font-black bg-[#C8F169] hover:bg-[#d6f78a] text-[#0B0B0D] shadow transition flex items-center justify-center space-x-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Confirm Resolution</span>
+                  </button>
+                )}
               </div>
             </motion.div>
           </div>

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Issue, IssueType, AiAnalysisResult } from '../types';
+import { Issue, IssueType } from '../types';
 import { compressImage } from '../utils/imageCompressor';
+import { findNearbyDuplicateIssue } from '../utils/geo';
+import { DuplicateWarningSheet } from './DuplicateWarningSheet';
 import {
   Camera,
   Image as ImageIcon,
@@ -9,17 +11,15 @@ import {
   AlertCircle,
   MapPin,
   ExternalLink,
-  Sparkles,
   Loader2,
   RefreshCw,
   Send,
-  AlertTriangle,
-  Building2,
-  ShieldAlert,
 } from 'lucide-react';
 
 interface ReportScreenProps {
+  existingIssues: Issue[];
   onIssueCreated: (newIssue: Issue) => void;
+  onUpvoteExisting: (existingIssue: Issue) => void;
   onCancel: () => void;
 }
 
@@ -33,7 +33,9 @@ const ISSUE_OPTIONS: IssueType[] = [
 ];
 
 export const ReportScreen: React.FC<ReportScreenProps> = ({
+  existingIssues,
   onIssueCreated,
+  onUpvoteExisting,
   onCancel,
 }) => {
   // Step 1: Photo
@@ -53,16 +55,18 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
   const [selectedType, setSelectedType] = useState<IssueType | null>(null);
   const [customType, setCustomType] = useState<string>('');
 
-  // Step 4: AI Analysis State
-  const [aiLoading, setAiLoading] = useState<boolean>(false);
-  const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(null);
-  const [aiError, setAiError] = useState<string | null>(null);
+  // Duplicate Detection State
+  const [duplicateMatch, setDuplicateMatch] = useState<{
+    issue: Issue;
+    distanceMetres: number;
+  } | null>(null);
+  const [isCheckingDuplicate, setIsCheckingDuplicate] = useState<boolean>(false);
 
-  // Success "Good Job" Screen State
+  // Success "Good Job" Animation Screen State
   const [showSuccessCard, setShowSuccessCard] = useState<boolean>(false);
-  const [createdIssueHolder, setCreatedIssueHolder] = useState<Issue | null>(null);
+  const [pendingNewIssue, setPendingNewIssue] = useState<Issue | null>(null);
 
-  // Geolocation auto-request on mount
+  // Request location automatically on mount
   useEffect(() => {
     requestLocation();
   }, []);
@@ -94,58 +98,17 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
     );
   };
 
-  // Photo processing
+  // Compress photo down to ~1024px JPEG
   const handlePhotoFile = async (file: File) => {
     try {
       setIsCompressing(true);
-      const compressed = await compressImage(file, 800, 0.82);
+      const compressed = await compressImage(file, 1024, 0.82);
       setPhotoData(compressed);
-      setIsCompressing(false);
-
-      // Trigger Gemini analysis automatically
-      triggerAiAnalysis(compressed);
     } catch (err: any) {
       console.error('Image compression failed:', err);
-      setIsCompressing(false);
       alert('Unable to process photo. Please choose another image.');
-    }
-  };
-
-  // Automatic Gemini call via server proxy
-  const triggerAiAnalysis = async (base64Img: string) => {
-    setAiLoading(true);
-    setAiError(null);
-
-    const callApi = async () => {
-      const res = await fetch('/api/ai/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ photoBase64: base64Img }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
-    };
-
-    try {
-      let data: AiAnalysisResult;
-      try {
-        data = await callApi();
-      } catch (err) {
-        console.warn('First AI call failed, retrying once...', err);
-        data = await callApi();
-      }
-
-      setAiResult(data);
-
-      // Automatically pre-select suggested type, but user can change it
-      if (data.suggestedType && ISSUE_OPTIONS.includes(data.suggestedType)) {
-        setSelectedType(data.suggestedType);
-      }
-    } catch (err: any) {
-      console.warn('AI analysis failed:', err);
-      setAiError('AI analysis could not complete. You can still select the issue type and post normally.');
     } finally {
-      setAiLoading(false);
+      setIsCompressing(false);
     }
   };
 
@@ -158,9 +121,19 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
     selectedType !== null &&
     (selectedType !== 'Other' || customType.trim().length > 0);
 
-  const canPost = hasPhoto && hasLocation && hasType && !isCompressing;
+  const canPost = hasPhoto && hasLocation && hasType && !isCompressing && !isCheckingDuplicate;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Finalizes submission
+  const finalizePost = (issue: Issue) => {
+    setPendingNewIssue(issue);
+    setShowSuccessCard(true);
+
+    setTimeout(() => {
+      onIssueCreated(issue);
+    }, 1800);
+  };
+
+  const handlePostClick = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canPost || !photoData || !selectedType) return;
 
@@ -177,30 +150,62 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
       latitude: coords ? coords.lat : null,
       longitude: coords ? coords.lng : null,
       areaName: areaDescription || 'Visakhapatnam, Andhra Pradesh',
-      plusOnes: 1,
+      plusOnes: 1, // User's initial device +1
       status: 'open',
       createdAt: Date.now(),
       fixYes: 0,
       fixNo: 0,
-      aiSeverity: aiResult?.severity,
-      aiReason: aiResult?.severityReason,
-      aiSituation: aiResult?.situation,
-      aiHazard: aiResult?.hazard,
-      aiDepartment: aiResult?.department,
     };
 
-    setCreatedIssueHolder(newIssue);
-    setShowSuccessCard(true);
+    // Feature 3: Check duplicates within 150m if coords are present
+    if (coords) {
+      const match = findNearbyDuplicateIssue(
+        existingIssues,
+        selectedType,
+        coords.lat,
+        coords.lng,
+        150
+      );
 
-    // After brief celebration animation, post to feed
-    setTimeout(() => {
-      onIssueCreated(newIssue);
-    }, 1800);
+      if (match) {
+        setIsCheckingDuplicate(true);
+        // Optional quick AI check with 8-second timeout
+        try {
+          const res = await fetch('/api/ai/duplicate-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              existingPhotoBase64: match.issue.photoBefore,
+              newPhotoBase64: photoData,
+              issueType: selectedType,
+            }),
+          });
+          const data = await res.json();
+
+          // If AI confirms with certainty it's NOT the same issue, skip warning
+          if (data && data.sameIssue === false) {
+            setIsCheckingDuplicate(false);
+            finalizePost(newIssue);
+            return;
+          }
+        } catch {
+          // If AI fails/times out, still show warning based on location match
+        }
+
+        setIsCheckingDuplicate(false);
+        setDuplicateMatch(match);
+        setPendingNewIssue(newIssue);
+        return;
+      }
+    }
+
+    // No duplicate found, proceed immediately
+    finalizePost(newIssue);
   };
 
   return (
     <div className="pb-36 pt-3 px-4 max-w-md mx-auto space-y-5">
-      {/* Full-screen "Good Job" Success Card Animation */}
+      {/* Full-screen "Good Job" Success Screen */}
       <AnimatePresence>
         {showSuccessCard && (
           <motion.div
@@ -233,7 +238,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
               transition={{ delay: 0.25 }}
               className="text-sm text-[#94949E] max-w-xs leading-relaxed"
             >
-              Your civic report has been lodged into the VizagPulse audit feed.
+              Your civic report has been added to the VizagPulse audit feed.
             </motion.p>
 
             <motion.div
@@ -242,7 +247,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
               transition={{ delay: 0.35 }}
               className="mt-6 px-4 py-2 rounded-full bg-[#141417] border border-[rgba(230,230,225,0.18)] text-xs font-semibold text-[#C8F169]"
             >
-              Redirecting to Live Feed...
+              Returning to Live Feed...
             </motion.div>
           </motion.div>
         )}
@@ -255,19 +260,19 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
             Report Issue
           </h1>
           <p className="text-xs text-[#94949E] mt-0.5">
-            Log an infrastructure hazard in Visakhapatnam
+            Log an infrastructure problem in Visakhapatnam
           </p>
         </div>
         <button
           type="button"
           onClick={onCancel}
-          className="text-xs px-3 py-1.5 rounded-full bg-[#141417] text-[#94949E] hover:text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] font-semibold transition"
+          className="text-xs px-3.5 py-1.5 rounded-full bg-[#141417] text-[#94949E] hover:text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] font-semibold transition"
         >
           Cancel
         </button>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <form onSubmit={handlePostClick} className="space-y-5">
         {/* ================= STEP 1: CAPTURE PHOTO ================= */}
         <section className="bg-[#141417] border border-[rgba(230,230,225,0.18)] rounded-[26px] p-5 space-y-4">
           <div className="flex items-center justify-between">
@@ -275,7 +280,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
               <span className="w-6 h-6 rounded-full bg-[#C8F169] text-[#0B0B0D] text-xs font-black flex items-center justify-center">
                 1
               </span>
-              <h2 className="text-sm font-bold text-[#EDEDE8]">Capture Photo</h2>
+              <h2 className="text-sm font-bold text-[#EDEDE8]">Take Photo</h2>
             </div>
             {photoData && (
               <span className="text-[10px] text-[#22C55E] font-bold tracking-wider flex items-center space-x-1 uppercase">
@@ -286,7 +291,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
           </div>
 
           {photoData ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="relative aspect-[16/10] bg-[#0B0B0D] rounded-2xl overflow-hidden border border-[rgba(230,230,225,0.10)]">
                 <img
                   src={photoData}
@@ -295,146 +300,13 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
                 />
                 <button
                   type="button"
-                  onClick={() => {
-                    setPhotoData(null);
-                    setAiResult(null);
-                    setAiError(null);
-                  }}
+                  onClick={() => setPhotoData(null)}
                   className="absolute bottom-3 right-3 px-3 py-1.5 rounded-xl bg-[#0B0B0D]/90 text-white text-xs font-semibold border border-white/20 backdrop-blur-md flex items-center space-x-1.5 active:scale-95"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                   <span>Retake</span>
                 </button>
               </div>
-
-              {/* Shimmering Skeleton while AI loads */}
-              {aiLoading && (
-                <div className="bg-[#1B1B20] border border-[rgba(230,230,225,0.14)] rounded-2xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <Sparkles className="w-4 h-4 text-[#C8F169] animate-spin" />
-                      <span className="text-xs font-bold text-[#EDEDE8]">
-                        Analyzing scene with Gemini...
-                      </span>
-                    </div>
-                    <span className="text-[9px] font-mono text-[#94949E] uppercase">
-                      Multimodal
-                    </span>
-                  </div>
-                  {/* Shimmer lines */}
-                  <div className="space-y-2 pt-1">
-                    <div className="h-3 rounded-full animate-shimmer w-full"></div>
-                    <div className="h-3 rounded-full animate-shimmer w-4/5"></div>
-                    <div className="h-3 rounded-full animate-shimmer w-3/5"></div>
-                  </div>
-                  <div className="pt-2 flex items-center space-x-2">
-                    <div className="h-6 w-24 rounded-full animate-shimmer"></div>
-                    <div className="h-6 w-32 rounded-full animate-shimmer"></div>
-                  </div>
-                </div>
-              )}
-
-              {/* AI Analysis Result Card */}
-              {aiResult && !aiLoading && (
-                <div className="bg-[#1B1B20] border border-[rgba(230,230,225,0.18)] rounded-2xl p-4 space-y-3">
-                  <div className="flex items-center justify-between border-b border-[rgba(230,230,225,0.10)] pb-2.5">
-                    <div className="flex items-center space-x-2">
-                      <Sparkles className="w-4 h-4 text-[#C8F169]" />
-                      <h3 className="text-xs font-extrabold text-[#EDEDE8] tracking-tight">
-                        AI Analysis
-                      </h3>
-                    </div>
-                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-[#0B0B0D] text-[#C8F169] border border-[#C8F169]/30 uppercase tracking-widest">
-                      AI-generated
-                    </span>
-                  </div>
-
-                  {/* Situation Text First (2-3 sentences) */}
-                  <div>
-                    <span className="text-[10px] font-bold text-[#94949E] uppercase tracking-wider block mb-1">
-                      Observed Situation
-                    </span>
-                    <p className="text-xs text-[#EDEDE8] leading-relaxed">
-                      {aiResult.situation}
-                    </p>
-                  </div>
-
-                  {/* Severity with visual bar */}
-                  <div className="space-y-1.5 pt-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-[10px] font-bold text-[#94949E] uppercase tracking-wider">
-                        Assessed Severity
-                      </span>
-                      <span className="font-mono font-extrabold text-sm text-[#C8F169] tnum">
-                        {aiResult.severity}
-                        <span className="text-[10px] text-[#94949E]">/10</span>
-                      </span>
-                    </div>
-
-                    {/* Visual Severity Bar */}
-                    <div className="w-full h-2.5 bg-[#0B0B0D] rounded-full overflow-hidden p-0.5 border border-[rgba(230,230,225,0.10)]">
-                      <div
-                        className={`h-full rounded-full transition-all duration-700 ease-out ${
-                          aiResult.severity >= 8
-                            ? 'bg-gradient-to-r from-amber-400 to-red-500'
-                            : aiResult.severity >= 5
-                            ? 'bg-gradient-to-r from-[#C8F169] to-amber-400'
-                            : 'bg-[#C8F169]'
-                        }`}
-                        style={{ width: `${(aiResult.severity / 10) * 100}%` }}
-                      />
-                    </div>
-                    <p className="text-[11px] text-[#94949E] italic">
-                      "{aiResult.severityReason}"
-                    </p>
-                  </div>
-
-                  {/* Hazard Risk */}
-                  <div className="p-2.5 rounded-xl bg-[#0B0B0D] border border-red-500/20 flex items-start space-x-2 text-xs">
-                    <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                    <div>
-                      <span className="text-[10px] font-bold text-red-300 uppercase tracking-wider block">
-                        Direct Public Hazard
-                      </span>
-                      <p className="text-[#EDEDE8] text-[11px] mt-0.5">
-                        {aiResult.hazard}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Responsible Department */}
-                  <div className="flex items-center space-x-2 text-xs text-[#94949E] pt-1 border-t border-[rgba(230,230,225,0.10)]">
-                    <Building2 className="w-3.5 h-3.5 text-[#C8F169] shrink-0" />
-                    <span>Routing:</span>
-                    <strong className="text-[#EDEDE8] font-semibold truncate">
-                      {aiResult.department}
-                    </strong>
-                  </div>
-                </div>
-              )}
-
-              {/* Error fallback with Try Again button */}
-              {aiError && !aiLoading && (
-                <div className="p-3.5 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-2">
-                  <div className="flex items-start space-x-2 text-xs text-amber-200">
-                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-semibold">{aiError}</p>
-                      <p className="text-[11px] text-amber-200/80 mt-0.5">
-                        You can still fill in the details below and post normally.
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => triggerAiAnalysis(photoData)}
-                    className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-bold transition flex items-center space-x-1.5"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    <span>Try again</span>
-                  </button>
-                </div>
-              )}
             </div>
           ) : (
             <div className="space-y-2.5">
@@ -469,7 +341,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
                 {isCompressing ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin" />
-                    <span>Optimizing photo...</span>
+                    <span>Compressing image...</span>
                   </>
                 ) : (
                   <>
@@ -492,7 +364,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
           )}
         </section>
 
-        {/* ================= STEP 2: LOCATION VERIFICATION ================= */}
+        {/* ================= STEP 2: LOCATION ================= */}
         <section className="bg-[#141417] border border-[rgba(230,230,225,0.18)] rounded-[26px] p-5 space-y-3.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
@@ -512,7 +384,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
           {locationStatus === 'locating' && (
             <div className="p-3 rounded-2xl bg-[#1B1B20] border border-[rgba(230,230,225,0.10)] flex items-center space-x-2 text-xs text-[#94949E]">
               <Loader2 className="w-4 h-4 animate-spin text-[#C8F169]" />
-              <span>Locating GPS in Visakhapatnam...</span>
+              <span>Locating GPS coordinates in Visakhapatnam...</span>
             </div>
           )}
 
@@ -538,7 +410,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
               </p>
               <input
                 type="text"
-                placeholder="Optional area name (e.g. Rushikonda, MVP Colony, Gajuwaka)"
+                placeholder="Optional area name (e.g. Madhurawada, Rushikonda, MVP Colony)"
                 value={manualArea}
                 onChange={(e) => setManualArea(e.target.value)}
                 className="w-full mt-1 px-3.5 py-2 rounded-xl bg-[#0B0B0D] border border-[rgba(230,230,225,0.18)] text-xs text-[#EDEDE8] placeholder-[#94949E]/60 focus:border-[#C8F169] focus:outline-none"
@@ -606,7 +478,6 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
             )}
           </div>
 
-          {/* Big Tappable Buttons with auto-preselect support */}
           <div className="grid grid-cols-2 gap-2.5">
             {ISSUE_OPTIONS.map((type) => {
               const isSelected = selectedType === type;
@@ -630,7 +501,6 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
             })}
           </div>
 
-          {/* If "Other" is tapped */}
           {selectedType === 'Other' && (
             <div className="pt-2">
               <label className="block text-[11px] uppercase tracking-wider font-bold text-[#94949E] mb-1">
@@ -649,7 +519,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
           )}
         </section>
 
-        {/* ================= STEP 4: BIG ACCENT POST BUTTON ================= */}
+        {/* ================= STEP 4: POST BUTTON ================= */}
         <section className="space-y-2 pt-1">
           <button
             type="submit"
@@ -660,8 +530,17 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
                 : 'bg-[#141417] text-[#94949E]/50 border border-[rgba(230,230,225,0.10)] cursor-not-allowed'
             }`}
           >
-            <Send className="w-4 h-4 stroke-[2.5]" />
-            <span>Post to VizagPulse Feed</span>
+            {isCheckingDuplicate ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-[#0B0B0D]" />
+                <span>Checking nearby issues...</span>
+              </>
+            ) : (
+              <>
+                <Send className="w-4 h-4 stroke-[2.5]" />
+                <span>Post</span>
+              </>
+            )}
           </button>
 
           {!canPost && (
@@ -677,6 +556,26 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
           )}
         </section>
       </form>
+
+      {/* Feature 3: Duplicate Detection Bottom Sheet */}
+      <DuplicateWarningSheet
+        isOpen={duplicateMatch !== null}
+        duplicateMatch={duplicateMatch}
+        onUpvoteExisting={(existingIssue) => {
+          setDuplicateMatch(null);
+          onUpvoteExisting(existingIssue);
+        }}
+        onReportAnyway={() => {
+          const toPost = pendingNewIssue;
+          setDuplicateMatch(null);
+          if (toPost) {
+            finalizePost(toPost);
+          }
+        }}
+        onCancel={() => {
+          setDuplicateMatch(null);
+        }}
+      />
     </div>
   );
 };

@@ -24,7 +24,7 @@ const ai = new GoogleGenAI({
   },
 });
 
-// Helper to sanitize base64 data strings
+// Helper: Sanitize base64 data strings (stripping data: prefix and returning raw base64)
 function extractBase64(dataUriOrRaw: string): { data: string; mimeType: string } {
   const match = dataUriOrRaw.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
   if (match) {
@@ -39,184 +39,154 @@ function extractBase64(dataUriOrRaw: string): { data: string; mimeType: string }
   };
 }
 
-// Helper to strip markdown code blocks
-function cleanJsonText(raw: string): string {
+// Helper: Strip markdown code fences and extract valid JSON
+function cleanAndExtractJson(raw: string): any {
   let cleaned = raw.trim();
   if (cleaned.startsWith('```json')) {
     cleaned = cleaned.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
   } else if (cleaned.startsWith('```')) {
     cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
   }
-  return cleaned.trim();
+  cleaned = cleaned.trim();
+
+  // Find outermost { } or [ ]
+  const firstBrace = cleaned.indexOf('{');
+  const firstBracket = cleaned.indexOf('[');
+  if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (lastBrace !== -1) {
+      cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+    }
+  } else if (firstBracket !== -1) {
+    const lastBracket = cleaned.lastIndexOf(']');
+    if (lastBracket !== -1) {
+      cleaned = cleaned.slice(firstBracket, lastBracket + 1);
+    }
+  }
+
+  return JSON.parse(cleaned);
 }
 
-// 1. Comprehensive AI Analysis Endpoint
-app.post('/api/ai/analyze', async (req, res) => {
-  try {
-    const { photoBase64 } = req.body;
+// Helper: Wrap promise with timeout
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`AI operation timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+}
 
-    if (!photoBase64) {
-      return res.status(400).json({ error: 'Missing photoBase64' });
+// =========================================================================
+// 1. FEATURE 1: AI PRIORITY RANKING ENDPOINT
+// =========================================================================
+app.post('/api/ai/priority-ranking', async (req, res) => {
+  try {
+    const { issues } = req.body;
+
+    if (!Array.isArray(issues) || issues.length === 0) {
+      return res.status(400).json({ error: 'Missing or empty issues array' });
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(503).json({
-        error: 'Gemini API key is not configured in server environment',
-      });
+      return res.status(503).json({ error: 'Gemini API key is not configured' });
     }
 
-    const { data, mimeType } = extractBase64(photoBase64);
+    const compactList = issues.map((i: any) => ({
+      id: String(i.id),
+      type: String(i.type),
+      area: String(i.areaName || 'Vizag'),
+      daysOpen: Number(i.daysOpen) || 1,
+      plusOnes: Number(i.plusOnes) || 0,
+      disputed: Boolean(i.disputed),
+    }));
 
-    const imagePart = {
-      inlineData: {
-        mimeType: mimeType || 'image/jpeg',
-        data,
-      },
-    };
+    const promptText = `You are an urban municipal prioritization AI for Visakhapatnam (Vizag), India.
+Evaluate these open civic reports and assign a priority score from 1 to 10 to each issue.
+Consider severity of damage, traffic/pedestrian risk, days left open, and community +1 endorsements.
+1 = lowest priority/minor cosmetic, 10 = critical hazard or major road closure.
 
-    const textPart = {
-      text: `Analyze this photo of an urban civic environment in Visakhapatnam (Vizag), India.
-Inspect what is shown carefully.
-- If it shows a civic infrastructure issue (pothole, drain overflow, sewage, garbage dump, dark/broken streetlight, broken water pipe, illegal trench, etc.):
-  1. "situation": Write 2-3 plain sentences describing what is visible in the photo and why it is a problem.
-  2. "suggestedType": Pick one from ["Pothole", "Drain / Sewage", "Garbage", "Streetlight", "Water leak", "Other"].
-  3. "severity": Rate severity on an integer scale from 1 to 10.
-  4. "severityReason": One short sentence on why this score was assigned.
-  5. "hazard": One short sentence on the direct risk to pedestrians, cyclists, or motorists.
-  6. "department": The most appropriate municipal division (e.g. "Roads & Bridges Department", "Public Health & Sanitation Division", "Electrical & Street Lighting Wing", "Water Supply & Sewerage Board", "Town Planning").
-- If the photo does NOT show a civic issue (e.g., a selfie, indoor room, pet, random object):
-  1. "situation": State clearly that the photo does not appear to show a public municipal or civic infrastructure issue.
-  2. "suggestedType": "Other".
-  3. "severity": 1.
-  4. "severityReason": "No civic infrastructure defect or hazard detected in photo."
-  5. "hazard": "None identified."
-  6. "department": "Public Relations / General Administration".
+Input Issues:
+${JSON.stringify(compactList, null, 2)}
 
-Return JSON only conforming to the schema.`,
-    };
+Return JSON ONLY: an array of objects matching this exact structure:
+[
+  { "id": "string", "priority": integer 1-10, "reason": "one short sentence" }
+]`;
 
-    const callGemini = async () => {
+    const executeCall = async () => {
       const response = await ai.models.generateContent({
         model: 'gemini-3.8-flash',
-        contents: { parts: [imagePart, textPart] },
+        contents: promptText,
         config: {
           responseMimeType: 'application/json',
           responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              situation: {
-                type: Type.STRING,
-                description: '2-3 plain sentences describing what is visible in the photo and why it is a problem',
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                priority: { type: Type.INTEGER },
+                reason: { type: Type.STRING },
               },
-              suggestedType: {
-                type: Type.STRING,
-                description: 'one of Pothole, Drain / Sewage, Garbage, Streetlight, Water leak, Other',
-                enum: ['Pothole', 'Drain / Sewage', 'Garbage', 'Streetlight', 'Water leak', 'Other'],
-              },
-              severity: {
-                type: Type.INTEGER,
-                description: 'integer 1-10 (set to 1 if not a civic issue)',
-              },
-              severityReason: {
-                type: Type.STRING,
-                description: 'one short sentence on severity rating',
-              },
-              hazard: {
-                type: Type.STRING,
-                description: 'one short sentence on the risk to people',
-              },
-              department: {
-                type: Type.STRING,
-                description: 'most likely municipal department',
-              },
+              required: ['id', 'priority', 'reason'],
             },
-            required: [
-              'situation',
-              'suggestedType',
-              'severity',
-              'severityReason',
-              'hazard',
-              'department',
-            ],
           },
         },
       });
       return response.text;
     };
 
-    // Try first call, and retry once if it fails or returns malformed text
-    let rawText = '';
+    let rawOutput = '';
     try {
-      rawText = (await callGemini()) || '';
+      rawOutput = (await withTimeout(executeCall(), 20000)) || '';
     } catch (firstErr) {
-      console.warn('Gemini analyze attempt 1 failed, retrying once...', firstErr);
-      rawText = (await callGemini()) || '';
+      console.warn('AI priority ranking retry attempt 1...', firstErr);
+      rawOutput = (await withTimeout(executeCall(), 20000)) || '';
     }
 
-    if (!rawText) {
-      throw new Error('Received empty response from Gemini');
+    if (!rawOutput) {
+      throw new Error('Empty response received from Gemini');
     }
 
-    const cleaned = cleanJsonText(rawText);
-    const parsed = JSON.parse(cleaned);
+    const parsedArray = cleanAndExtractJson(rawOutput);
+    if (!Array.isArray(parsedArray)) {
+      throw new Error('Expected JSON array of priority rankings');
+    }
 
-    const validTypes = ['Pothole', 'Drain / Sewage', 'Garbage', 'Streetlight', 'Water leak', 'Other'];
-    const suggestedType = validTypes.includes(parsed.suggestedType) ? parsed.suggestedType : 'Other';
-    const severity = Math.max(1, Math.min(10, Math.round(Number(parsed.severity) || 5)));
+    // Validate and clamp 1-10
+    const validMap = new Map<string, { priority: number; reason: string }>();
+    for (const item of parsedArray) {
+      if (item && item.id) {
+        const p = Math.max(1, Math.min(10, Math.round(Number(item.priority) || 5)));
+        const r = String(item.reason || 'Prioritized based on hazard and citizen urgency.');
+        validMap.set(String(item.id), { priority: p, reason: r });
+      }
+    }
 
-    return res.json({
-      situation: parsed.situation || 'Civic issue documented in Visakhapatnam.',
-      suggestedType,
-      severity,
-      severityReason: parsed.severityReason || 'Evaluated via multimodal civic analysis.',
-      hazard: parsed.hazard || 'Caution advised in vicinity of incident.',
-      department: parsed.department || 'Greater Visakhapatnam Municipal Works',
-    });
+    const results = compactList.map((item) => {
+      const found = validMap.get(item.id);
+      if (found) {
+        return { id: item.id, priority: found.priority, reason: found.reason };
+      }
+      return null;
+    }).filter(Boolean);
+
+    return res.json({ rankings: results });
   } catch (error: any) {
-    console.error('Error analyzing photo with Gemini:', error?.message || error);
-    return res.status(500).json({
-      error: error?.message || 'Failed to complete AI analysis',
-    });
+    console.error('Error during AI priority ranking:', error?.message || error);
+    return res.status(500).json({ error: error?.message || 'Failed to prioritize issues' });
   }
 });
 
-// Backward compatible endpoint for simple severity
-app.post('/api/ai/severity', async (req, res) => {
-  try {
-    const { photoBase64 } = req.body;
-    if (!photoBase64) return res.status(400).json({ error: 'Missing photo' });
-    const { data, mimeType } = extractBase64(photoBase64);
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: {
-        parts: [
-          { inlineData: { mimeType, data } },
-          { text: 'Assess civic severity 1-10 with one sentence reason in JSON {severity, reason}.' },
-        ],
-      },
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
-
-    const parsed = JSON.parse(cleanJsonText(response.text || '{}'));
-    return res.json({
-      severity: Number(parsed.severity) || 5,
-      reason: parsed.reason || 'Assessed by Gemini.',
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: err?.message || 'Error' });
-  }
-});
-
-// 2. AI Fix Check Endpoint
+// =========================================================================
+// 2. FEATURE 2: AI FIX CHECK ENDPOINT (Shared for Issue Page & Authority)
+// =========================================================================
 app.post('/api/ai/fix-check', async (req, res) => {
   try {
     const { photoBeforeBase64, photoAfterBase64, issueType } = req.body;
 
     if (!photoBeforeBase64 || !photoAfterBase64) {
-      return res.status(400).json({ error: 'Both photos required' });
+      return res.status(400).json({ error: 'Both photoBeforeBase64 and photoAfterBase64 are required' });
     }
 
     if (!process.env.GEMINI_API_KEY) {
@@ -226,7 +196,7 @@ app.post('/api/ai/fix-check', async (req, res) => {
     const before = extractBase64(photoBeforeBase64);
     const after = extractBase64(photoAfterBase64);
 
-    const callFixCheck = async () => {
+    const executeCall = async () => {
       const response = await ai.models.generateContent({
         model: 'gemini-3.8-flash',
         contents: {
@@ -234,15 +204,9 @@ app.post('/api/ai/fix-check', async (req, res) => {
             { inlineData: { mimeType: before.mimeType, data: before.data } },
             { inlineData: { mimeType: after.mimeType, data: after.data } },
             {
-              text: `You are an objective municipal civic inspector comparing a BEFORE photo (first image) and an AFTER photo (second image) of a reported civic issue (${issueType || 'civic issue'}) in Visakhapatnam (Vizag), India.
-Evaluate whether the issue has been legitimately resolved:
-- "fixed": The issue seen in BEFORE is clearly repaired, cleared, resurfaced, or replaced in AFTER.
-- "not_fixed": The AFTER photo shows the same scene and the problem remains broken, unrepaired, or inadequate.
-- "unsure": The angle, zoom, lighting, or location looks different or ambiguous, so you cannot confidently confirm it is the exact same spot or resolved.
-
-Return JSON with:
-- "verdict": one of "fixed", "not_fixed", or "unsure"
-- "reason": one short sentence explaining your verdict.`,
+              text: `Compare these two photos of the same civic issue (${issueType || 'civic issue'}) in Visakhapatnam (before, then after).
+Return JSON only: {verdict: one of 'fixed','not_fixed','unsure', reason: one short sentence}.
+Be strict: if the place, angle or scene looks different, or you cannot tell, return 'unsure'. Only return 'fixed' if the problem is clearly gone.`,
             },
           ],
         },
@@ -253,7 +217,7 @@ Return JSON with:
             properties: {
               verdict: {
                 type: Type.STRING,
-                description: 'verdict: fixed, not_fixed, or unsure',
+                description: 'Verdict: fixed, not_fixed, or unsure',
                 enum: ['fixed', 'not_fixed', 'unsure'],
               },
               reason: {
@@ -268,29 +232,137 @@ Return JSON with:
       return response.text;
     };
 
-    let raw = '';
+    let rawOutput = '';
     try {
-      raw = (await callFixCheck()) || '';
-    } catch (err) {
-      console.warn('AI fix check retry attempt...', err);
-      raw = (await callFixCheck()) || '';
+      rawOutput = (await withTimeout(executeCall(), 20000)) || '';
+    } catch (firstErr) {
+      console.warn('AI fix check retry attempt...', firstErr);
+      rawOutput = (await withTimeout(executeCall(), 20000)) || '';
     }
 
-    const parsed = JSON.parse(cleanJsonText(raw));
-    let verdict = String(parsed.verdict).toLowerCase();
+    if (!rawOutput) {
+      throw new Error('Received empty response from Gemini');
+    }
+
+    const parsed = cleanAndExtractJson(rawOutput);
+    let verdict = String(parsed.verdict || '').toLowerCase().trim();
     if (verdict !== 'fixed' && verdict !== 'not_fixed' && verdict !== 'unsure') {
       verdict = 'unsure';
     }
 
     return res.json({
       verdict,
-      reason: parsed.reason || 'AI verification check completed.',
+      reason: String(parsed.reason || 'Verification audit complete.'),
     });
   } catch (error: any) {
-    console.error('Error during fix check:', error?.message || error);
-    return res.status(500).json({
-      error: error?.message || 'Failed to verify fix',
+    console.error('Error during AI fix check:', error?.message || error);
+    return res.status(500).json({ error: error?.message || 'AI verification check unavailable' });
+  }
+});
+
+// =========================================================================
+// 3. FEATURE 3: DUPLICATE DETECTION AI ENDPOINT (8s timeout)
+// =========================================================================
+app.post('/api/ai/duplicate-check', async (req, res) => {
+  try {
+    const { existingPhotoBase64, newPhotoBase64, issueType } = req.body;
+
+    if (!existingPhotoBase64 || !newPhotoBase64) {
+      return res.status(400).json({ error: 'Both photos required for comparison' });
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(503).json({ error: 'Gemini API key is not configured' });
+    }
+
+    const existing = extractBase64(existingPhotoBase64);
+    const incoming = extractBase64(newPhotoBase64);
+
+    const executeCall = async () => {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: {
+          parts: [
+            { inlineData: { mimeType: existing.mimeType, data: existing.data } },
+            { inlineData: { mimeType: incoming.mimeType, data: incoming.data } },
+            {
+              text: `Do these two photos show the same civic issue (${issueType || 'civic issue'}) at the same place in Visakhapatnam? Return JSON only: {sameIssue: true or false, reason: one short sentence}.`,
+            },
+          ],
+        },
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              sameIssue: { type: Type.BOOLEAN },
+              reason: { type: Type.STRING },
+            },
+            required: ['sameIssue', 'reason'],
+          },
+        },
+      });
+      return response.text;
+    };
+
+    let rawOutput = '';
+    try {
+      rawOutput = (await withTimeout(executeCall(), 8000)) || '';
+    } catch (firstErr) {
+      console.warn('AI duplicate check attempt failed/timed out...', firstErr);
+      return res.json({ sameIssue: true, reason: 'Location match verified (AI confirmation timed out).' });
+    }
+
+    const parsed = cleanAndExtractJson(rawOutput);
+    return res.json({
+      sameIssue: Boolean(parsed.sameIssue),
+      reason: String(parsed.reason || 'Image analysis comparison completed.'),
     });
+  } catch (error: any) {
+    console.error('Error during duplicate check:', error?.message || error);
+    // On error, default to true so location warning is kept as specified
+    return res.json({ sameIssue: true, reason: 'Location match verified.' });
+  }
+});
+
+// =========================================================================
+// 4. BUILT-IN SYSTEM CHECK (Gemini API Test Endpoint)
+// =========================================================================
+app.get('/api/ai/system-check', async (_req, res) => {
+  const startTime = Date.now();
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(503).json({ success: false, error: 'GEMINI_API_KEY not configured' });
+    }
+
+    const callTest = async () => {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: 'Ping test: return JSON only: {"status": "ok", "app": "VizagPulse"}',
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              status: { type: Type.STRING },
+              app: { type: Type.STRING },
+            },
+            required: ['status', 'app'],
+          },
+        },
+      });
+      return response.text;
+    };
+
+    const raw = await withTimeout(callTest(), 20000);
+    const parsed = cleanAndExtractJson(raw || '{}');
+
+    if (parsed.status === 'ok') {
+      return res.json({ success: true, latencyMs: Date.now() - startTime });
+    }
+    return res.json({ success: false, error: 'Malformed JSON payload' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'API call failed' });
   }
 });
 

@@ -18,19 +18,26 @@ export function formatTimeAgo(timestamp: number): string {
   return 'Just now';
 }
 
-export function formatDaysOpen(createdAt: number): string {
+export function getDaysOpen(createdAt: number): number {
   const now = Date.now();
-  const diffDays = Math.max(1, Math.round((now - createdAt) / (1000 * 60 * 60 * 24)));
-  return `Open for ${diffDays} ${diffDays === 1 ? 'day' : 'days'}`;
+  const diffMs = Math.max(0, now - createdAt);
+  return Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+}
+
+export function formatDaysOpen(createdAt: number): string {
+  const days = getDaysOpen(createdAt);
+  return `Open for ${days} ${days === 1 ? 'day' : 'days'}`;
 }
 
 export function formatDaysToFix(createdAt: number, fixedAt?: number): string {
   const end = fixedAt || Date.now();
-  const diffDays = Math.max(1, Math.round((end - createdAt) / (1000 * 60 * 60 * 24)));
-  return `Fixed in ${diffDays} ${diffDays === 1 ? 'day' : 'days'}`;
-}
+  const diffMs = Math.max(0, end - createdAt);
+  const diffHours = Math.max(1, Math.round(diffMs / (1000 * 60 * 60)));
 
-export function getDaysCount(createdAt: number): number {
-  const now = Date.now();
-  return Math.max(1, Math.round((now - createdAt) / (1000 * 60 * 60 * 24)));
+  if (diffHours < 24) {
+    return `Fixed in ${diffHours} ${diffHours === 1 ? 'hour' : 'hours'}`;
+  }
+
+  const diffDays = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+  return `Fixed in ${diffDays} ${diffDays === 1 ? 'day' : 'days'}`;
 }
