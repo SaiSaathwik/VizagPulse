@@ -180,7 +180,13 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
               issueType: selectedType,
             }),
           });
-          const data = await res.json();
+          const text = await res.text();
+          let data: any = null;
+          try {
+            data = JSON.parse(text);
+          } catch {
+            data = null;
+          }
 
           // If AI confirms with certainty it's NOT the same issue, skip warning
           if (data && data.sameIssue === false) {

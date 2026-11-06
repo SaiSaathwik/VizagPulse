@@ -24,6 +24,8 @@ export interface Issue {
   priority?: number; // 1-10
   priorityReason?: string;
   isAiPriority?: boolean;
+  aiVerdict?: 'fixed' | 'not_fixed' | 'unsure' | 'manual';
+  aiReason?: string;
 }
 
 export type TabType = 'feed' | 'report' | 'authority';

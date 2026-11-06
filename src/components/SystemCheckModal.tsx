@@ -105,16 +105,30 @@ export const SystemCheckModal: React.FC<SystemCheckModalProps> = ({ isOpen, onCl
     setGeminiResult({ status: 'running', detail: 'Contacting Gemini model...' });
     try {
       const res = await fetch('/api/ai/system-check');
-      const data = await res.json();
-      if (data.success) {
+      const text = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error(`API endpoint not reachable or returned HTML: ${res.status}`);
+      }
+
+      if (data && data.success) {
         setGeminiResult({
           status: 'pass',
           detail: `Gemini 3.8 Flash responded in ${data.latencyMs ?? 500}ms with valid JSON.`,
         });
       } else {
+        let cleanError = data?.error || 'Gemini returned error response';
+        try {
+          const parsedErr = JSON.parse(cleanError);
+          if (parsedErr?.error?.message) {
+            cleanError = parsedErr.error.message.split('\n')[0];
+          }
+        } catch {}
         setGeminiResult({
           status: 'fail',
-          detail: data.error || 'Gemini returned error response',
+          detail: cleanError,
         });
       }
     } catch (e: any) {

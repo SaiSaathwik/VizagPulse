@@ -103,11 +103,14 @@ export async function fetchAiPriorityRankings(
     body: JSON.stringify({ issues: payload }),
   });
 
-  if (!res.ok) {
-    throw new Error(`Server returned HTTP ${res.status}`);
+  const text = await res.text();
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new Error(`API endpoint not reachable or returned HTML: ${res.status}`);
   }
 
-  const data = await res.json();
   const map: Record<string, { priority: number; reason: string }> = {};
 
   if (Array.isArray(data.rankings)) {

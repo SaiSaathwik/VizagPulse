@@ -236,7 +236,7 @@ export default function App() {
   const handleMarkFixed = (
     issueId: string,
     photoAfter: string,
-    aiVerdict?: 'fixed' | 'not_fixed' | 'unsure',
+    aiVerdict?: 'fixed' | 'not_fixed' | 'unsure' | 'manual',
     aiReason?: string
   ) => {
     setIssues((prev) =>
@@ -249,6 +249,8 @@ export default function App() {
           fixedAt: Date.now(),
           fixYes: 1,
           fixNo: 0,
+          aiVerdict: aiVerdict || (aiReason ? 'manual' : undefined),
+          aiReason: aiReason || (aiVerdict === 'manual' ? 'Fixed (Manually Verified by GVMC)' : undefined),
         };
       })
     );

@@ -22,7 +22,7 @@ interface AuthorityScreenProps {
   onMarkFixed: (
     issueId: string,
     photoAfter: string,
-    aiCheckVerdict?: 'fixed' | 'not_fixed' | 'unsure',
+    aiCheckVerdict?: 'fixed' | 'not_fixed' | 'unsure' | 'manual',
     aiCheckReason?: string
   ) => void;
   onSelectIssue: (issue: Issue) => void;
@@ -97,17 +97,30 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
     try {
       setIsCompressing(true);
       const compressed = await compressImage(file, 1024, 0.82);
-      // Temporarily save photo in state so it is never lost if AI fails
+      // Save photo in state - DO NOT auto-trigger AI check
       setAfterPhoto(compressed);
+      setAiResult(null);
+      setAiError(null);
       setIsCompressing(false);
-
-      // Run shared AI fix verification
-      runAiFixCheck(selectedIssueForFix, compressed);
     } catch (err) {
       console.error('Failed to compress after photo:', err);
       setIsCompressing(false);
       alert('Unable to process photo. Please choose another image.');
     }
+  };
+
+  const handleManualSkipFix = () => {
+    if (!selectedIssueForFix || !afterPhoto) return;
+    onMarkFixed(
+      selectedIssueForFix.id,
+      afterPhoto,
+      'manual',
+      'Fixed (Manually Verified by GVMC)'
+    );
+    setSelectedIssueForFix(null);
+    setAfterPhoto(null);
+    setAiResult(null);
+    setAiError(null);
   };
 
   const runAiFixCheck = async (issue: Issue, afterPhotoData: string) => {
@@ -126,22 +139,25 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
         }),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const text = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`API endpoint not reachable or returned HTML: ${res.status}`);
+      }
 
       if (data && data.verdict) {
         setAiResult({
           verdict: data.verdict,
           reason: data.reason || 'Verification audit complete.',
         });
-
-        // If AI confirmed fixed, auto-enable confirm
       } else {
         throw new Error('Invalid verdict payload');
       }
     } catch (err: any) {
       console.warn('AI fix check failed or timed out:', err);
-      setAiError('AI check unavailable');
+      setAiError(err?.message || 'AI check unavailable');
     } finally {
       setAiChecking(false);
     }
@@ -152,12 +168,27 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
     onMarkFixed(
       selectedIssueForFix.id,
       afterPhoto,
-      aiResult?.verdict || 'unsure',
-      aiResult?.reason || 'Confirmed resolution by municipal authority.'
+      aiResult?.verdict || 'fixed',
+      aiResult?.reason || 'Verified resolution by municipal authority.'
     );
     setSelectedIssueForFix(null);
     setAfterPhoto(null);
     setAiResult(null);
+    setAiError(null);
+  };
+
+  const handleOverrideFix = () => {
+    if (!selectedIssueForFix || !afterPhoto) return;
+    onMarkFixed(
+      selectedIssueForFix.id,
+      afterPhoto,
+      'manual',
+      'Fixed (Manually Verified by GVMC)'
+    );
+    setSelectedIssueForFix(null);
+    setAfterPhoto(null);
+    setAiResult(null);
+    setAiError(null);
   };
 
   return (
@@ -459,19 +490,44 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
                       </div>
                       <button
                         type="button"
+                        disabled={aiChecking}
                         onClick={() => {
                           setAfterPhoto(null);
                           setAiResult(null);
+                          setAiError(null);
                         }}
-                        className="absolute bottom-2 right-2 px-2.5 py-1 rounded-xl bg-black/80 text-white text-[11px] font-semibold border border-white/20"
+                        className="absolute bottom-2 right-2 px-2.5 py-1 rounded-xl bg-black/80 hover:bg-black text-white text-[11px] font-semibold border border-white/20 transition"
                       >
                         Change photo
                       </button>
                     </div>
 
+                    {/* Step 2 Options: Run AI Verification VS Mark Fixed Manually (Skip AI) */}
+                    {!aiChecking && !aiResult && !aiError && (
+                      <div className="space-y-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => selectedIssueForFix && runAiFixCheck(selectedIssueForFix, afterPhoto)}
+                          className="w-full py-3 px-4 rounded-2xl bg-[#C8F169] hover:bg-[#d6f78a] text-[#0B0B0D] text-xs font-black flex items-center justify-center space-x-2 shadow transition active:scale-98"
+                        >
+                          <Sparkles className="w-4 h-4 text-[#0B0B0D]" />
+                          <span>Run AI Verification &amp; Close</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleManualSkipFix}
+                          className="w-full py-2.5 px-4 rounded-2xl bg-[#1B1B20] hover:bg-[#23232A] text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] text-xs font-bold flex items-center justify-center space-x-1.5 transition active:scale-98"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5 text-[#22C55E]" />
+                          <span>Mark as Fixed Manually (Skip AI)</span>
+                        </button>
+                      </div>
+                    )}
+
                     {/* AI Fix Check Status */}
                     {aiChecking && (
-                      <div className="p-3 rounded-2xl bg-[#1B1B20] border border-[#C8F169]/30 flex items-center space-x-2 text-xs text-[#EDEDE8]">
+                      <div className="p-3.5 rounded-2xl bg-[#1B1B20] border border-[#C8F169]/30 flex items-center space-x-2.5 text-xs text-[#EDEDE8]">
                         <Loader2 className="w-4 h-4 animate-spin text-[#C8F169]" />
                         <span>Checking with AI... comparing before &amp; after photos</span>
                       </div>
@@ -516,44 +572,67 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
                           "{aiResult.reason}"
                         </p>
 
-                        {/* Buttons for not_fixed / unsure */}
+                        {/* If fixed: Confirm Resolution */}
+                        {aiResult.verdict === 'fixed' && (
+                          <button
+                            type="button"
+                            onClick={handleConfirmFix}
+                            className="w-full py-2.5 px-3 rounded-full text-xs font-black bg-[#C8F169] hover:bg-[#d6f78a] text-[#0B0B0D] shadow transition flex items-center justify-center space-x-1.5 active:scale-98"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Confirm Resolution &amp; Close</span>
+                          </button>
+                        )}
+
+                        {/* Prominent Override Button for not_fixed / unsure */}
                         {(aiResult.verdict === 'not_fixed' || aiResult.verdict === 'unsure') && (
-                          <div className="pt-2 flex items-center space-x-2">
+                          <div className="pt-1.5 space-y-2">
                             <button
                               type="button"
-                              onClick={handleConfirmFix}
-                              className="flex-1 py-2 px-3 rounded-full bg-[#EDEDE8] hover:bg-white text-[#0B0B0D] text-xs font-extrabold transition shadow"
+                              onClick={handleOverrideFix}
+                              className="w-full py-2.5 px-4 rounded-full bg-[#EDEDE8] hover:bg-white text-[#0B0B0D] text-xs font-black transition shadow flex items-center justify-center space-x-1.5 active:scale-98"
                             >
-                              Mark fixed anyway
+                              <CheckCircle2 className="w-4 h-4 text-[#0B0B0D]" />
+                              <span>Override &amp; Mark Fixed Anyway</span>
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => cameraInputRef.current?.click()}
-                              className="py-2 px-3 rounded-full bg-[#1B1B20] text-[#94949E] hover:text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] text-xs font-bold transition"
-                            >
-                              Retake photo
-                            </button>
+                            <div className="flex items-center space-x-2">
+                              <button
+                                type="button"
+                                onClick={() => cameraInputRef.current?.click()}
+                                className="flex-1 py-2 px-3 rounded-full bg-[#1B1B20] text-[#94949E] hover:text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] text-xs font-bold transition text-center"
+                              >
+                                Retake photo
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => galleryInputRef.current?.click()}
+                                className="flex-1 py-2 px-3 rounded-full bg-[#1B1B20] text-[#94949E] hover:text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] text-xs font-bold transition text-center"
+                              >
+                                Choose other
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
                     )}
 
-                    {/* AI Error / Timeout Fallback */}
+                    {/* AI Error / Timeout Fallback Alert Card */}
                     {aiError && !aiChecking && (
-                      <div className="p-3.5 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-2 text-xs">
+                      <div className="p-3.5 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-2.5 text-xs">
                         <div className="flex items-center space-x-2 text-amber-200">
                           <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                          <span className="font-bold">{aiError}</span>
+                          <span className="font-bold">AI Verification Alert</span>
                         </div>
-                        <p className="text-[11px] text-amber-200/80">
-                          You can still mark this issue as fixed manually.
+                        <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                          {aiError}. You can override and mark this issue as fixed manually without AI.
                         </p>
                         <button
                           type="button"
-                          onClick={handleConfirmFix}
-                          className="w-full py-2 px-3 rounded-full bg-[#EDEDE8] text-[#0B0B0D] text-xs font-extrabold transition shadow"
+                          onClick={handleOverrideFix}
+                          className="w-full py-2.5 px-4 rounded-full bg-[#EDEDE8] hover:bg-white text-[#0B0B0D] text-xs font-black transition shadow flex items-center justify-center space-x-1.5 active:scale-98"
                         >
-                          Mark fixed
+                          <CheckCircle2 className="w-4 h-4 text-[#0B0B0D]" />
+                          <span>Override &amp; Mark Fixed Anyway</span>
                         </button>
                       </div>
                     )}
@@ -583,26 +662,15 @@ export const AuthorityScreen: React.FC<AuthorityScreenProps> = ({
                 )}
               </div>
 
-              {/* Actions */}
+              {/* Actions Footer */}
               <div className="pt-2 flex items-center space-x-2">
                 <button
                   type="button"
                   onClick={() => setSelectedIssueForFix(null)}
-                  className="flex-1 py-2.5 px-3 rounded-full bg-[#1B1B20] text-[#94949E] hover:text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] text-xs font-bold transition"
+                  className="w-full py-2.5 px-3 rounded-full bg-[#1B1B20] text-[#94949E] hover:text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] text-xs font-bold transition"
                 >
                   Cancel
                 </button>
-                {aiResult?.verdict === 'fixed' && (
-                  <button
-                    type="button"
-                    disabled={!afterPhoto || isCompressing || aiChecking}
-                    onClick={handleConfirmFix}
-                    className="flex-1 py-2.5 px-3 rounded-full text-xs font-black bg-[#C8F169] hover:bg-[#d6f78a] text-[#0B0B0D] shadow transition flex items-center justify-center space-x-1.5"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Confirm Resolution</span>
-                  </button>
-                )}
               </div>
             </motion.div>
           </div>

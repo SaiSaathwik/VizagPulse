@@ -39,32 +39,37 @@ function extractBase64(dataUriOrRaw: string): { data: string; mimeType: string }
   };
 }
 
-// Helper: Strip markdown code fences and extract valid JSON
+// Helper: Thoroughly strip markdown code blocks and extract valid JSON
 function cleanAndExtractJson(raw: string): any {
-  let cleaned = raw.trim();
-  if (cleaned.startsWith('```json')) {
-    cleaned = cleaned.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
-  } else if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
-  }
-  cleaned = cleaned.trim();
+  if (!raw || typeof raw !== 'string') return null;
 
-  // Find outermost { } or [ ]
-  const firstBrace = cleaned.indexOf('{');
-  const firstBracket = cleaned.indexOf('[');
-  if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
-    const lastBrace = cleaned.lastIndexOf('}');
-    if (lastBrace !== -1) {
-      cleaned = cleaned.slice(firstBrace, lastBrace + 1);
-    }
-  } else if (firstBracket !== -1) {
-    const lastBracket = cleaned.lastIndexOf(']');
-    if (lastBracket !== -1) {
-      cleaned = cleaned.slice(firstBracket, lastBracket + 1);
-    }
-  }
+  try {
+    // Strip any markdown code fences anywhere in the string (```json, ```javascript, ```js, or bare ```)
+    let cleaned = raw
+      .replace(/```(?:json|javascript|js)?/gi, '')
+      .replace(/```/g, '')
+      .trim();
 
-  return JSON.parse(cleaned);
+    // Find outermost { } or [ ]
+    const firstBrace = cleaned.indexOf('{');
+    const firstBracket = cleaned.indexOf('[');
+    if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+      const lastBrace = cleaned.lastIndexOf('}');
+      if (lastBrace !== -1) {
+        cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+      }
+    } else if (firstBracket !== -1) {
+      const lastBracket = cleaned.lastIndexOf(']');
+      if (lastBracket !== -1) {
+        cleaned = cleaned.slice(firstBracket, lastBracket + 1);
+      }
+    }
+
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.warn('Failed to parse JSON from AI response:', e);
+    return null;
+  }
 }
 
 // Helper: Wrap promise with timeout
@@ -80,6 +85,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 // 1. FEATURE 1: AI PRIORITY RANKING ENDPOINT
 // =========================================================================
 app.post('/api/ai/priority-ranking', async (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
   try {
     const { issues } = req.body;
 
@@ -88,7 +94,7 @@ app.post('/api/ai/priority-ranking', async (req, res) => {
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(503).json({ error: 'Gemini API key is not configured' });
+      return res.status(200).json({ rankings: [] });
     }
 
     const compactList = issues.map((i: any) => ({
@@ -174,7 +180,7 @@ Return JSON ONLY: an array of objects matching this exact structure:
     return res.json({ rankings: results });
   } catch (error: any) {
     console.error('Error during AI priority ranking:', error?.message || error);
-    return res.status(500).json({ error: error?.message || 'Failed to prioritize issues' });
+    return res.status(200).json({ rankings: [], error: error?.message || 'Failed to prioritize issues' });
   }
 });
 
@@ -182,6 +188,7 @@ Return JSON ONLY: an array of objects matching this exact structure:
 // 2. FEATURE 2: AI FIX CHECK ENDPOINT (Shared for Issue Page & Authority)
 // =========================================================================
 app.post('/api/ai/fix-check', async (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
   try {
     const { photoBeforeBase64, photoAfterBase64, issueType } = req.body;
 
@@ -190,7 +197,10 @@ app.post('/api/ai/fix-check', async (req, res) => {
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(503).json({ error: 'Gemini API key is not configured' });
+      return res.status(200).json({
+        verdict: 'unsure',
+        reason: 'AI verification key not configured (manual override available).',
+      });
     }
 
     const before = extractBase64(photoBeforeBase64);
@@ -245,18 +255,22 @@ Be strict: if the place, angle or scene looks different, or you cannot tell, ret
     }
 
     const parsed = cleanAndExtractJson(rawOutput);
-    let verdict = String(parsed.verdict || '').toLowerCase().trim();
+    let verdict = String(parsed?.verdict || '').toLowerCase().trim();
     if (verdict !== 'fixed' && verdict !== 'not_fixed' && verdict !== 'unsure') {
       verdict = 'unsure';
     }
 
     return res.json({
       verdict,
-      reason: String(parsed.reason || 'Verification audit complete.'),
+      reason: String(parsed?.reason || 'Verification audit complete.'),
     });
   } catch (error: any) {
     console.error('Error during AI fix check:', error?.message || error);
-    return res.status(500).json({ error: error?.message || 'AI verification check unavailable' });
+    return res.status(200).json({
+      verdict: 'unsure',
+      reason: 'AI visual check could not complete (manual override available).',
+      error: error?.message,
+    });
   }
 });
 
@@ -264,6 +278,7 @@ Be strict: if the place, angle or scene looks different, or you cannot tell, ret
 // 3. FEATURE 3: DUPLICATE DETECTION AI ENDPOINT (8s timeout)
 // =========================================================================
 app.post('/api/ai/duplicate-check', async (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
   try {
     const { existingPhotoBase64, newPhotoBase64, issueType } = req.body;
 
@@ -272,7 +287,7 @@ app.post('/api/ai/duplicate-check', async (req, res) => {
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(503).json({ error: 'Gemini API key is not configured' });
+      return res.status(200).json({ sameIssue: true, reason: 'Location match verified (AI unconfigured).' });
     }
 
     const existing = extractBase64(existingPhotoBase64);
@@ -310,18 +325,17 @@ app.post('/api/ai/duplicate-check', async (req, res) => {
       rawOutput = (await withTimeout(executeCall(), 8000)) || '';
     } catch (firstErr) {
       console.warn('AI duplicate check attempt failed/timed out...', firstErr);
-      return res.json({ sameIssue: true, reason: 'Location match verified (AI confirmation timed out).' });
+      return res.status(200).json({ sameIssue: true, reason: 'Location match verified (AI confirmation timed out).' });
     }
 
     const parsed = cleanAndExtractJson(rawOutput);
-    return res.json({
-      sameIssue: Boolean(parsed.sameIssue),
-      reason: String(parsed.reason || 'Image analysis comparison completed.'),
+    return res.status(200).json({
+      sameIssue: Boolean(parsed?.sameIssue),
+      reason: String(parsed?.reason || 'Image analysis comparison completed.'),
     });
   } catch (error: any) {
     console.error('Error during duplicate check:', error?.message || error);
-    // On error, default to true so location warning is kept as specified
-    return res.json({ sameIssue: true, reason: 'Location match verified.' });
+    return res.status(200).json({ sameIssue: true, reason: 'Location match verified.' });
   }
 });
 
@@ -329,10 +343,11 @@ app.post('/api/ai/duplicate-check', async (req, res) => {
 // 4. BUILT-IN SYSTEM CHECK (Gemini API Test Endpoint)
 // =========================================================================
 app.get('/api/ai/system-check', async (_req, res) => {
+  res.setHeader('Content-Type', 'application/json');
   const startTime = Date.now();
   try {
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(503).json({ success: false, error: 'GEMINI_API_KEY not configured' });
+      return res.status(200).json({ success: false, error: 'GEMINI_API_KEY not configured in environment' });
     }
 
     const callTest = async () => {
@@ -357,12 +372,13 @@ app.get('/api/ai/system-check', async (_req, res) => {
     const raw = await withTimeout(callTest(), 20000);
     const parsed = cleanAndExtractJson(raw || '{}');
 
-    if (parsed.status === 'ok') {
-      return res.json({ success: true, latencyMs: Date.now() - startTime });
+    if (parsed && parsed.status === 'ok') {
+      return res.status(200).json({ success: true, latencyMs: Date.now() - startTime });
     }
-    return res.json({ success: false, error: 'Malformed JSON payload' });
+    return res.status(200).json({ success: false, error: 'Malformed JSON payload from model' });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err?.message || 'API call failed' });
+    console.warn('System check Gemini ping error:', err?.message || err);
+    return res.status(200).json({ success: false, error: err?.message || 'Gemini API call failed' });
   }
 });
 

@@ -32,7 +32,7 @@ interface IssuePageProps {
   onMarkFixed: (
     issueId: string,
     photoAfter: string,
-    aiVerdict?: 'fixed' | 'not_fixed' | 'unsure',
+    aiVerdict?: 'fixed' | 'not_fixed' | 'unsure' | 'manual',
     aiReason?: string
   ) => void;
   onBack: () => void;
@@ -76,17 +76,30 @@ export const IssuePage: React.FC<IssuePageProps> = ({
     try {
       setIsCompressing(true);
       const compressed = await compressImage(file, 1024, 0.82);
-      // Temporarily save photo in state so it is never lost if AI fails
+      // Save photo in state - do NOT run AI automatically
       setTempAfterPhoto(compressed);
+      setAiResult(null);
+      setAiError(null);
       setIsCompressing(false);
-
-      // Run shared AI fix check
-      runAiFixCheck(compressed);
     } catch (err) {
       console.error('Failed to compress after photo:', err);
       setIsCompressing(false);
       alert('Unable to process photo. Please choose another image.');
     }
+  };
+
+  const handleManualSkipFix = () => {
+    if (!tempAfterPhoto) return;
+    onMarkFixed(
+      issue.id,
+      tempAfterPhoto,
+      'manual',
+      'Fixed (Manually Verified by GVMC)'
+    );
+    setShowFixUpload(false);
+    setTempAfterPhoto(null);
+    setAiResult(null);
+    setAiError(null);
   };
 
   const runAiFixCheck = async (photoAfterBase64: string) => {
@@ -105,8 +118,13 @@ export const IssuePage: React.FC<IssuePageProps> = ({
         }),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const text = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`API endpoint not reachable or returned HTML: ${res.status}`);
+      }
 
       if (data && data.verdict) {
         setAiResult({
@@ -114,7 +132,7 @@ export const IssuePage: React.FC<IssuePageProps> = ({
           reason: data.reason || 'Verification comparison complete.',
         });
 
-        // If AI confirmed fixed, auto apply or prompt
+        // If AI confirmed fixed, auto apply
         if (data.verdict === 'fixed') {
           onMarkFixed(issue.id, photoAfterBase64, 'fixed', data.reason);
           setShowFixUpload(false);
@@ -124,7 +142,7 @@ export const IssuePage: React.FC<IssuePageProps> = ({
       }
     } catch (err: any) {
       console.warn('AI fix check failed or timed out:', err);
-      setAiError('AI check unavailable');
+      setAiError(err?.message || 'AI check unavailable');
     } finally {
       setIsAiChecking(false);
     }
@@ -135,11 +153,13 @@ export const IssuePage: React.FC<IssuePageProps> = ({
     onMarkFixed(
       issue.id,
       tempAfterPhoto,
-      aiResult?.verdict || 'unsure',
-      aiResult?.reason || 'Confirmed via citizen resolution.'
+      'manual',
+      'Fixed (Manually Verified by GVMC)'
     );
     setShowFixUpload(false);
     setTempAfterPhoto(null);
+    setAiResult(null);
+    setAiError(null);
   };
 
   return (
@@ -358,11 +378,46 @@ export const IssuePage: React.FC<IssuePageProps> = ({
                 <div className="absolute top-2 left-2 px-2.5 py-0.5 rounded-full bg-[#22C55E] text-[#0B0B0D] text-[10px] font-extrabold uppercase">
                   AFTER PHOTO
                 </div>
+                <button
+                  type="button"
+                  disabled={isAiChecking}
+                  onClick={() => {
+                    setTempAfterPhoto(null);
+                    setAiResult(null);
+                    setAiError(null);
+                  }}
+                  className="absolute bottom-2 right-2 px-2.5 py-1 rounded-xl bg-black/80 hover:bg-black text-white text-[11px] font-semibold border border-white/20 transition"
+                >
+                  Change photo
+                </button>
               </div>
+
+              {/* Step 2 Options: Run AI Verification VS Mark Fixed Manually (Skip AI) */}
+              {!isAiChecking && !aiResult && !aiError && (
+                <div className="space-y-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => runAiFixCheck(tempAfterPhoto)}
+                    className="w-full py-3 px-4 rounded-2xl bg-[#C8F169] hover:bg-[#d6f78a] text-[#0B0B0D] text-xs font-black flex items-center justify-center space-x-2 shadow transition active:scale-98"
+                  >
+                    <Sparkles className="w-4 h-4 text-[#0B0B0D]" />
+                    <span>Run AI Verification &amp; Close</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleManualSkipFix}
+                    className="w-full py-2.5 px-4 rounded-2xl bg-[#1B1B20] hover:bg-[#23232A] text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] text-xs font-bold flex items-center justify-center space-x-1.5 transition active:scale-98"
+                  >
+                    <CheckCircle className="w-3.5 h-3.5 text-[#22C55E]" />
+                    <span>Mark as Fixed Manually (Skip AI)</span>
+                  </button>
+                </div>
+              )}
 
               {/* Shimmering "Checking with AI..." */}
               {isAiChecking && (
-                <div className="p-3 rounded-2xl bg-[#1B1B20] border border-[#C8F169]/30 flex items-center space-x-2 text-xs text-[#EDEDE8]">
+                <div className="p-3.5 rounded-2xl bg-[#1B1B20] border border-[#C8F169]/30 flex items-center space-x-2.5 text-xs text-[#EDEDE8]">
                   <Loader2 className="w-4 h-4 animate-spin text-[#C8F169]" />
                   <span>Checking with AI... comparing before &amp; after photos</span>
                 </div>
@@ -406,20 +461,21 @@ export const IssuePage: React.FC<IssuePageProps> = ({
                     "{aiResult.reason}"
                   </p>
 
-                  {/* Actions for not_fixed or unsure */}
+                  {/* Actions for not_fixed or unsure: Prominent Override */}
                   {(aiResult.verdict === 'not_fixed' || aiResult.verdict === 'unsure') && (
-                    <div className="pt-2 flex items-center space-x-2">
+                    <div className="pt-1.5 space-y-2">
                       <button
                         type="button"
                         onClick={confirmManualFix}
-                        className="flex-1 py-2 px-3 rounded-full bg-[#EDEDE8] hover:bg-white text-[#0B0B0D] text-xs font-extrabold transition shadow"
+                        className="w-full py-2.5 px-4 rounded-full bg-[#EDEDE8] hover:bg-white text-[#0B0B0D] text-xs font-black transition shadow flex items-center justify-center space-x-1.5 active:scale-98"
                       >
-                        Mark fixed anyway
+                        <CheckCircle className="w-4 h-4 text-[#0B0B0D]" />
+                        <span>Override &amp; Mark Fixed Anyway</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => cameraInputRef.current?.click()}
-                        className="py-2 px-3 rounded-full bg-[#1B1B20] text-[#94949E] hover:text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] text-xs font-bold transition"
+                        className="w-full py-2 px-3 rounded-full bg-[#1B1B20] text-[#94949E] hover:text-[#EDEDE8] border border-[rgba(230,230,225,0.18)] text-xs font-bold transition text-center"
                       >
                         Retake photo
                       </button>
@@ -430,20 +486,21 @@ export const IssuePage: React.FC<IssuePageProps> = ({
 
               {/* AI Error / Timeout Fallback */}
               {aiError && !isAiChecking && (
-                <div className="p-3.5 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-2 text-xs">
+                <div className="p-3.5 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-2.5 text-xs">
                   <div className="flex items-center space-x-2 text-amber-200">
                     <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span className="font-bold">{aiError}</span>
+                    <span className="font-bold">AI Verification Alert</span>
                   </div>
-                  <p className="text-[11px] text-amber-200/80">
-                    You can still mark this issue as fixed manually.
+                  <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                    {aiError}. You can override and mark this issue as fixed manually without AI.
                   </p>
                   <button
                     type="button"
                     onClick={confirmManualFix}
-                    className="w-full py-2 px-3 rounded-full bg-[#EDEDE8] text-[#0B0B0D] text-xs font-extrabold transition shadow"
+                    className="w-full py-2.5 px-4 rounded-full bg-[#EDEDE8] hover:bg-white text-[#0B0B0D] text-xs font-black transition shadow flex items-center justify-center space-x-1.5 active:scale-98"
                   >
-                    Mark fixed
+                    <CheckCircle className="w-4 h-4 text-[#0B0B0D]" />
+                    <span>Override &amp; Mark Fixed Anyway</span>
                   </button>
                 </div>
               )}
